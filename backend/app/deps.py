@@ -1,0 +1,51 @@
+"""FastAPI dependency helpers."""
+from __future__ import annotations
+
+from collections.abc import AsyncIterator
+from typing import Annotated
+
+from fastapi import Depends, Header
+from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from app.core.errors import AuthError, ForbiddenError
+from app.core.i18n import locale_dependency
+from app.core.security import decode_token
+from app.db import get_session
+from app.models import User, UserRole
+
+SessionDep = Annotated[AsyncSession, Depends(get_session)]
+LocaleDep = Annotated[str, Depends(locale_dependency)]
+
+
+async def _resolve_bearer(authorization: str | None) -> str:
+    if not authorization or not authorization.lower().startswith("bearer "):
+        raise AuthError("Missing or malformed Authorization header.")
+    return authorization.split(" ", 1)[1].strip()
+
+
+async def get_current_user(
+    session: SessionDep,
+    authorization: Annotated[str | None, Header()] = None,
+) -> User:
+    token = await _resolve_bearer(authorization)
+    payload = decode_token(token, expected_kind="access")
+    sub = payload.get("sub")
+    if not sub:
+        raise AuthError("Invalid token: missing subject.")
+    user = (await session.execute(select(User).where(User.id == sub))).scalar_one_or_none()
+    if not user or not user.is_active:
+        raise AuthError("Account no longer active.")
+    return user
+
+
+CurrentUser = Annotated[User, Depends(get_current_user)]
+
+
+async def require_admin(user: CurrentUser) -> User:
+    if user.role != UserRole.admin:
+        raise ForbiddenError("Admin role required.")
+    return user
+
+
+AdminUser = Annotated[User, Depends(require_admin)]

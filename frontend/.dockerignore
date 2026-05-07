@@ -1,0 +1,9 @@
+node_modules
+.next
+.turbo
+.env
+.env.*
+.git
+README.md
+tests
+coverage

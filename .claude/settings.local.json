@@ -1,0 +1,8 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(ls \"C:/Users/baton/.claude/projects/c--Users-baton-Documents-wow-ai-log-analyzer/memory/\" 2>/dev/null || echo \"no memory yet\")",
+      "Read(//c/Users/baton/.claude/projects/c--Users-baton-Documents-wow-ai-log-analyzer/memory/**)"
+    ]
+  }
+}

@@ -1,0 +1,70 @@
+[project]
+name = "wow-ai-log-analyzer-backend"
+version = "0.1.0"
+description = "FastAPI backend for the WoW AI Log Analyzer"
+readme = "../README.md"
+requires-python = ">=3.13"
+dependencies = [
+    "fastapi>=0.115",
+    "uvicorn[standard]>=0.32",
+    "pydantic>=2.9",
+    "pydantic-settings>=2.6",
+    "sqlalchemy[asyncio]>=2.0.36",
+    "asyncpg>=0.30",
+    "alembic>=1.14",
+    "greenlet>=3.1",
+    "passlib[bcrypt]>=1.7.4",
+    "bcrypt==4.0.1",
+    "python-jose[cryptography]>=3.3",
+    "python-multipart>=0.0.20",
+    "email-validator>=2.2",
+    "aiosmtplib>=3.0",
+    "jinja2>=3.1",
+    "httpx>=0.28",
+    "tenacity>=9.0",
+    "anthropic>=0.40",
+    "arq>=0.26",
+    "redis>=5.2",
+    "orjson>=3.10",
+    "python-slugify>=8.0",
+]
+
+[dependency-groups]
+dev = [
+    "pytest>=8.3",
+    "pytest-asyncio>=0.24",
+    "pytest-cov>=6.0",
+    "httpx>=0.28",
+    "asgi-lifespan>=2.1",
+    "aiosqlite>=0.20",
+    "ruff>=0.8",
+    "mypy>=1.13",
+    "types-python-jose>=3.3",
+    "freezegun>=1.5",
+]
+
+[tool.uv]
+default-groups = ["dev"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py313"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "B", "UP", "RUF", "ASYNC", "S", "PL"]
+ignore = ["S101", "PLR0913", "PLR0912"]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/*" = ["S105", "S106", "PLR2004"]
+"alembic/*" = ["E501"]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["tests"]
+addopts = "-q --strict-markers"
+
+[tool.mypy]
+python_version = "3.13"
+plugins = ["pydantic.mypy"]
+strict_optional = true
+ignore_missing_imports = true
