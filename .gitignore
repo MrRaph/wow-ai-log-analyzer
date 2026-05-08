@@ -44,3 +44,5 @@ postgres-data/
 redis-data/
 uploads/
 .claude/projects/
+
+.claude/
