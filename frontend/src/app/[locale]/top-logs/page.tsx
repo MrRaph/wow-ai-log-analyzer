@@ -106,14 +106,27 @@ function TopLogsView({ locale, user }: { locale: Locale; user: UserOut }) {
             </Select>
           </div>
           <div>
-            <Label>{locale === "de" ? "Boss-ID (optional)" : "Encounter ID (optional)"}</Label>
+            <Label>{locale === "de" ? "Boss (optional)" : "Boss (optional)"}</Label>
             <Select value={encounterId} onChange={(e) => setEncounterId(e.target.value)}>
-              <option value="">—</option>
-              {[...new Set((topLogsQ.data ?? []).map((r) => r.encounter_id))].map((id) => (
-                <option key={id} value={id}>
-                  {id}
-                </option>
-              ))}
+              <option value="">{locale === "de" ? "Alle Bosse" : "All bosses"}</option>
+              {(() => {
+                const seen = new Map<number, string>();
+                for (const r of topLogsQ.data ?? []) {
+                  if (!seen.has(r.encounter_id)) {
+                    seen.set(
+                      r.encounter_id,
+                      r.encounter_name_localized || r.encounter_name || `#${r.encounter_id}`,
+                    );
+                  }
+                }
+                return [...seen.entries()]
+                  .sort((a, b) => a[1].localeCompare(b[1], locale))
+                  .map(([id, name]) => (
+                    <option key={id} value={id}>
+                      {name}
+                    </option>
+                  ));
+              })()}
             </Select>
           </div>
           <div className="flex items-end">
@@ -142,7 +155,8 @@ function TopLogsView({ locale, user }: { locale: Locale; user: UserOut }) {
         <Card key={id} className="!p-0 overflow-hidden">
           <div className="flex items-center justify-between border-b border-bg-3 bg-bg-2 px-4 py-3">
             <h3 className="text-sm font-semibold">
-              {rows[0]?.encounter_name || `Encounter ${id}`} · {metric.toUpperCase()}
+              {rows[0]?.encounter_name_localized || rows[0]?.encounter_name || `Encounter ${id}`} ·{" "}
+              {metric.toUpperCase()}
             </h3>
             {cls && spec && (
               <span className="text-xs"><ClassBadge cls={cls} spec={spec} locale={locale} /></span>

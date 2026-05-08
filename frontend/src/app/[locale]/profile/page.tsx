@@ -3,10 +3,11 @@
 import { useMutation } from "@tanstack/react-query";
 import { useRouter } from "next/navigation";
 import { useTranslations } from "next-intl";
-import { use, useState } from "react";
+import { Suspense, use, useState } from "react";
 
 import { AuthGuard } from "@/components/AuthGuard";
 import { Button, Card, FieldError, Input, Label, Select } from "@/components/ui";
+import { WclConnectionPanel } from "@/components/WclConnectionPanel";
 import { ApiClientError, apiFetch } from "@/lib/api";
 import { setCachedUser, clearAuth } from "@/lib/auth";
 import type { Locale } from "@/i18n/config";
@@ -117,6 +118,9 @@ function ProfileView({ user, locale }: { user: UserOut; locale: Locale }) {
           </Button>
         </form>
       </Card>
+      <Suspense fallback={null}>
+        <WclConnectionPanel locale={locale} />
+      </Suspense>
       <Card>
         <h2 className="mb-2 font-semibold">{t("profile.deleteAccount")}</h2>
         <Button variant="danger" onClick={() => deactivateMut.mutate()} disabled={deactivateMut.isPending}>

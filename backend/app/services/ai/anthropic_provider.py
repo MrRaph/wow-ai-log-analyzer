@@ -1,7 +1,6 @@
 """Anthropic Claude provider for structured analysis output."""
 from __future__ import annotations
 
-import json
 import logging
 from typing import Any
 
@@ -9,6 +8,7 @@ from anthropic import AsyncAnthropic
 
 from app.config import settings
 from app.core.errors import UpstreamError
+from app.services.ai._json import extract_json_object
 from app.services.ai.base import AiResponse
 
 logger = logging.getLogger(__name__)
@@ -48,7 +48,7 @@ class AnthropicProvider:
 
         structured: dict[str, Any] = {}
         try:
-            structured = _extract_json_object(text)
+            structured = extract_json_object(text)
         except ValueError:
             logger.warning("Claude response did not contain a JSON object; returning text only.")
 
@@ -59,33 +59,3 @@ class AnthropicProvider:
             prompt_tokens=int(getattr(usage, "input_tokens", 0) or 0),
             completion_tokens=int(getattr(usage, "output_tokens", 0) or 0),
         )
-
-
-def _extract_json_object(text: str) -> dict[str, Any]:
-    """Extract the first balanced JSON object from a free-form response."""
-    start = text.find("{")
-    if start < 0:
-        raise ValueError("no JSON object found")
-    depth = 0
-    in_string = False
-    escape = False
-    for i in range(start, len(text)):
-        ch = text[i]
-        if in_string:
-            if escape:
-                escape = False
-            elif ch == "\\":
-                escape = True
-            elif ch == '"':
-                in_string = False
-            continue
-        if ch == '"':
-            in_string = True
-        elif ch == "{":
-            depth += 1
-        elif ch == "}":
-            depth -= 1
-            if depth == 0:
-                snippet = text[start : i + 1]
-                return json.loads(snippet)
-    raise ValueError("unterminated JSON object")

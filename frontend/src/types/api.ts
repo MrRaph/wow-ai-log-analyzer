@@ -79,6 +79,12 @@ export interface ReportPlayer {
   talents_loadout: string | null;
   casts: ReportPlayerCast[];
   gear: ReportPlayerGear[];
+  // WCL parse percentiles populated at import time. Both 0-100 (higher=
+  // better) — ``parse_percent`` is the all-logs value, ``ilvl_percent`` the
+  // gear-bracketed one. Either can be null when WCL has no ranking data
+  // (very fresh boss / non-public log / private realm).
+  parse_percent: number | null;
+  ilvl_percent: number | null;
 }
 
 export interface ReportFight {
@@ -86,6 +92,7 @@ export interface ReportFight {
   fight_id: number;
   encounter_id: number | null;
   name: string;
+  name_localized: string | null;
   difficulty: number | null;
   keystone_level: number | null;
   is_kill: boolean;
@@ -115,6 +122,13 @@ export interface ReportSummary {
   zone_name: string;
   start_time: string;
   end_time: string;
+}
+
+export interface PaginatedReports {
+  items: ReportSummary[];
+  total: number;
+  page: number;
+  page_size: number;
 }
 
 export interface AnalysisFinding {
@@ -148,6 +162,15 @@ export interface AnalysisStructured {
   talent_recommendations: string;
   gear_and_trinket_notes: string;
   comparison_to_top_logs: string;
+  // Underscore-prefixed fields are NOT produced by the AI — they are
+  // server-side metadata stitched into the structured output before save.
+  _localized_names?: Record<string, string>;
+  _parse_metrics?: {
+    parse_percent: number | null;
+    ilvl_percent: number | null;
+    rank: number | null;
+    out_of: number | null;
+  };
 }
 
 export interface Analysis {
@@ -165,11 +188,41 @@ export interface Analysis {
   updated_at: string;
 }
 
+export interface PaginatedAnalyses {
+  items: AnalysisListItem[];
+  total: number;
+  page: number;
+  page_size: number;
+}
+
+export interface AnalysisListItem {
+  id: string;
+  status: "pending" | "running" | "succeeded" | "failed";
+  locale: string;
+  provider: string;
+  model: string;
+  created_at: string;
+  headline: string;
+  overall_score: number | null;
+  role_focus: GameRole | null;
+  report_id: string;
+  report_code: string;
+  fight_id: string;
+  fight_name: string;
+  fight_name_localized: string | null;
+  encounter_id: number | null;
+  player_id: string;
+  player_name: string;
+  player_class: string;
+  player_spec: string;
+}
+
 export interface TopLog {
   id: string;
   spec_slug: string;
   encounter_id: number;
   encounter_name: string;
+  encounter_name_localized: string | null;
   difficulty: number | null;
   metric: "dps" | "hps";
   rank: number;
@@ -201,4 +254,42 @@ export interface AdminSettings {
   allow_registration: boolean;
   ai_provider: string;
   ai_model: string;
+}
+
+export interface WclConnectionStatus {
+  connected: boolean;
+  wcl_user_id?: number | null;
+  wcl_user_name?: string;
+  expires_at?: string | null;
+  scope?: string;
+}
+
+export interface WclAuthorizationStart {
+  authorization_url: string;
+}
+
+export interface WowDataImport {
+  id: string;
+  build: string;
+  status: "in_progress" | "success" | "failed";
+  started_at: string;
+  finished_at: string | null;
+  rows_imported: number;
+  source: string;
+  notes: string;
+}
+
+export interface WowDataStatus {
+  last_import: WowDataImport | null;
+  counts: Record<string, Record<string, number>>;
+  latest_known_build: string | null;
+}
+
+export interface TopLogsEncounterRow {
+  encounter_id: number;
+  encounter_name: string;
+  encounter_name_localized: string | null;
+  metrics: string[];
+  rows: number;
+  latest_recorded_at: string | null;
 }

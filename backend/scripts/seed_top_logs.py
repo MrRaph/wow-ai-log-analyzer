@@ -2,12 +2,25 @@
 
 Usage::
 
-    uv run python -m scripts.seed_top_logs <encounter_id>
+    uv run python -m scripts.seed_top_logs <encounter_id> [--m-plus]
 
 The daily worker only re-fetches (spec, encounter) pairs that already exist in
 the cache, so this script is the canonical way to introduce a *new* encounter
 to the rotation. Pick a current-tier raid encounter ID from
 https://www.warcraftlogs.com/zones (each encounter has a stable numeric id).
+
+By default the script assumes the encounter is a raid boss and applies the
+``TOP_LOGS_RAID_DIFFICULTY`` filter (Mythic by default). Pass ``--m-plus``
+for a Mythic+ dungeon encounter — the difficulty filter is skipped because
+M+ uses keystone-level brackets instead.
+
+Per-spec the script:
+- pulls the world ranking page (filtered to ``TOP_LOGS_REGION``);
+- drops HPS rankings without enough healers in the comp (``TOP_LOGS_MIN_HEALERS``);
+- fetches casts/gear/buffs/debuffs/damage-taken for the top
+  ``TOP_LOGS_DETAIL_COUNT`` survivors so the AI prompt can compare 1:1.
+
+Expect roughly 5-15 minutes for a single raid encounter across all 39 specs.
 """
 from __future__ import annotations
 
@@ -27,7 +40,7 @@ logging.basicConfig(level=logging.INFO, format="%(levelname)s [%(name)s] %(messa
 logger = logging.getLogger("seed_top_logs")
 
 
-async def _run(encounter_id: int) -> int:
+async def _run(encounter_id: int, *, is_raid: bool) -> int:
     total = 0
     async with WclClient() as wcl, async_session_factory() as session:
         async with session.begin():
@@ -36,9 +49,18 @@ async def _run(encounter_id: int) -> int:
             try:
                 async with session.begin():
                     rows = await refresh_top_logs_for_spec_encounter(
-                        session, spec=spec, encounter_id=encounter_id, wcl_client=wcl
+                        session,
+                        spec=spec,
+                        encounter_id=encounter_id,
+                        is_raid=is_raid,
+                        wcl_client=wcl,
                     )
-                logger.info("seeded %s rows for spec=%s encounter=%s", len(rows), spec.slug, encounter_id)
+                logger.info(
+                    "seeded %s rows for spec=%s encounter=%s",
+                    len(rows),
+                    spec.slug,
+                    encounter_id,
+                )
                 total += len(rows)
             except Exception:
                 logger.exception("failed for spec=%s encounter=%s", spec.slug, encounter_id)
@@ -48,8 +70,13 @@ async def _run(encounter_id: int) -> int:
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("encounter_id", type=int)
+    parser.add_argument(
+        "--m-plus",
+        action="store_true",
+        help="Treat this encounter as a Mythic+ dungeon boss (skip raid-difficulty filter).",
+    )
     args = parser.parse_args()
-    total = asyncio.run(_run(args.encounter_id))
+    total = asyncio.run(_run(args.encounter_id, is_raid=not args.m_plus))
     print(f"Seeded {total} rows.")
     return 0
 

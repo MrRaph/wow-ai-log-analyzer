@@ -1,12 +1,14 @@
 "use client";
 
 import { useTranslations } from "next-intl";
+import { useEffect, useMemo } from "react";
 
 import { Card } from "@/components/ui";
 import { ItemLink } from "@/components/ItemLink";
 import { SeverityBadge } from "@/components/SeverityBadge";
 import { SpellLink } from "@/components/SpellLink";
 import { formatPercent } from "@/lib/format";
+import { formatParsePercent, parseColorFor } from "@/lib/parsePercent";
 import type { Locale } from "@/i18n/config";
 import type { Analysis, AnalysisStructured } from "@/types/api";
 
@@ -17,6 +19,51 @@ interface Props {
 
 export function AnalysisCard({ analysis, locale }: Props) {
   const t = useTranslations();
+
+  const structured = (analysis.structured ?? {}) as AnalysisStructured;
+  // Local name lookup ({"spell:115151": "Erneuernder Nebel", ...}) the
+  // backend stores alongside the AI output. Used as a friendly display label
+  // for the spell/item chips even when ad blockers stop wowhead's tooltip
+  // script from auto-renaming the link.
+  const nameMap = structured._localized_names ?? {};
+  const parseMetrics = structured._parse_metrics;
+
+  // Wowhead's tooltip script (loaded once at the layout level) only scans
+  // the DOM at boot. AnalysisCard renders dynamically after the AI returns,
+  // so we have to manually nudge the script to attach tooltips + rewrite
+  // labels. The script may itself still be loading when this effect runs,
+  // so we retry a few times before giving up.
+  useEffect(() => {
+    if (analysis.status !== "succeeded") return;
+    if (typeof window === "undefined") return;
+    let attempts = 0;
+    let cancelled = false;
+    const tryRefresh = () => {
+      if (cancelled) return;
+      const wh = window.$WowheadPower;
+      if (wh && typeof wh.refreshLinks === "function") {
+        wh.refreshLinks();
+        return;
+      }
+      attempts += 1;
+      if (attempts < 20) {
+        // 20 × 250 ms = 5 s total — covers a slow wowhead script load.
+        window.setTimeout(tryRefresh, 250);
+      }
+    };
+    const timer = window.setTimeout(tryRefresh, 50);
+    return () => {
+      cancelled = true;
+      window.clearTimeout(timer);
+    };
+  }, [analysis.id, analysis.status]);
+
+  const findings = useMemo(() => {
+    return (structured.findings ?? [])
+      .slice()
+      .sort((a, b) => severityRank(a.severity) - severityRank(b.severity));
+  }, [structured.findings]);
+
   if (analysis.status === "running" || analysis.status === "pending") {
     return (
       <Card>
@@ -28,22 +75,56 @@ export function AnalysisCard({ analysis, locale }: Props) {
     return (
       <Card>
         <p className="text-red-400">{t("analyze.analysisFailed")}</p>
-        {analysis.error && <pre className="mt-2 whitespace-pre-wrap text-xs text-zinc-400">{analysis.error}</pre>}
+        {analysis.error && (
+          <pre className="mt-2 whitespace-pre-wrap text-xs text-zinc-400">{analysis.error}</pre>
+        )}
       </Card>
     );
   }
 
-  const s = analysis.structured as AnalysisStructured;
-  const findings = (s.findings ?? []).slice().sort((a, b) => severityRank(a.severity) - severityRank(b.severity));
+  const s = structured;
 
   return (
     <div className="space-y-4">
       <Card>
         <div className="flex flex-wrap items-baseline justify-between gap-3">
           <h2 className="text-xl font-semibold">{s.headline ?? "—"}</h2>
-          <span className="rounded-md bg-bg-3 px-3 py-1 text-sm">
-            {t("analyze.score")}: <span className="font-semibold text-accent">{s.overall_score ?? "—"}</span>
-          </span>
+          <div className="flex flex-wrap items-baseline gap-2">
+            {parseMetrics?.parse_percent !== null && parseMetrics?.parse_percent !== undefined ? (
+              <span
+                className="rounded-md px-3 py-1 text-sm"
+                style={{
+                  backgroundColor: parseColorFor(parseMetrics.parse_percent).background,
+                  color: parseColorFor(parseMetrics.parse_percent).foreground,
+                }}
+                title={t("analyze.parseTooltip")}
+              >
+                {t("analyze.parsePercent")}:{" "}
+                <span className="font-semibold">
+                  {formatParsePercent(parseMetrics.parse_percent)}
+                </span>
+              </span>
+            ) : null}
+            {parseMetrics?.ilvl_percent !== null && parseMetrics?.ilvl_percent !== undefined ? (
+              <span
+                className="rounded-md px-3 py-1 text-sm"
+                style={{
+                  backgroundColor: parseColorFor(parseMetrics.ilvl_percent).background,
+                  color: parseColorFor(parseMetrics.ilvl_percent).foreground,
+                }}
+                title={t("analyze.ilvlTooltip")}
+              >
+                {t("analyze.ilvlPercent")}:{" "}
+                <span className="font-semibold">
+                  {formatParsePercent(parseMetrics.ilvl_percent)}
+                </span>
+              </span>
+            ) : null}
+            <span className="rounded-md bg-bg-3 px-3 py-1 text-sm">
+              {t("analyze.score")}:{" "}
+              <span className="font-semibold text-accent">{s.overall_score ?? "—"}</span>
+            </span>
+          </div>
         </div>
         {s.strengths?.length ? (
           <div className="mt-4">
@@ -89,13 +170,23 @@ export function AnalysisCard({ analysis, locale }: Props) {
               </div>
               <h4 className="mt-2 text-base font-semibold text-zinc-100">{f.title}</h4>
               <p className="mt-1 whitespace-pre-line text-sm text-zinc-200">{f.detail}</p>
-              {(f.related_spell_ids?.length || f.related_item_ids?.length) ? (
+              {f.related_spell_ids?.length || f.related_item_ids?.length ? (
                 <div className="mt-2 flex flex-wrap gap-2 text-xs">
                   {f.related_spell_ids?.map((id) => (
-                    <SpellLink key={`s-${id}`} spellId={id} locale={locale} />
+                    <SpellLink
+                      key={`s-${id}`}
+                      spellId={id}
+                      locale={locale}
+                      fallback={nameMap[`spell:${id}`]}
+                    />
                   ))}
                   {f.related_item_ids?.map((id) => (
-                    <ItemLink key={`i-${id}`} itemId={id} locale={locale} />
+                    <ItemLink
+                      key={`i-${id}`}
+                      itemId={id}
+                      locale={locale}
+                      fallback={nameMap[`item:${id}`]}
+                    />
                   ))}
                 </div>
               ) : null}

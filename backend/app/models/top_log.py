@@ -36,4 +36,10 @@ class TopLog(Base, TimestampMixin):
     wcl_fight_id: Mapped[int] = mapped_column(Integer, nullable=False)
     recorded_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
     payload: Mapped[dict] = mapped_column(JSONB, default=dict, nullable=False)
-    detail_payload: Mapped[dict | None] = mapped_column(JSONB, nullable=True)  # casts/gear if fetched
+    # ``none_as_null=True`` so Python ``None`` maps to SQL NULL instead of the
+    # JSONB ``null`` sentinel — keeps DB queries like ``WHERE detail_payload
+    # IS NULL`` and ``count(detail_payload)`` honest about which rows
+    # actually have detail data attached.
+    detail_payload: Mapped[dict | None] = mapped_column(
+        JSONB(none_as_null=True), nullable=True
+    )

@@ -7,6 +7,8 @@ from app.core.errors import AuthError, ValidationAppError
 from app.core.security import hash_password, verify_password
 from app.deps import CurrentUser, SessionDep
 from app.schemas.user import UserOut, UserUpdateMe
+from app.schemas.wcl import WclConnectionStatus
+from app.services import wcl_oauth_service
 
 router = APIRouter()
 
@@ -35,4 +37,27 @@ async def update_me(payload: UserUpdateMe, user: CurrentUser, session: SessionDe
 @router.delete("/me", status_code=status.HTTP_204_NO_CONTENT)
 async def delete_me(user: CurrentUser, session: SessionDep) -> None:
     user.is_active = False
+    await session.commit()
+
+
+# --- Warcraft Logs OAuth connection ------------------------------------------------
+
+
+@router.get("/me/wcl-connection", response_model=WclConnectionStatus)
+async def read_wcl_connection(user: CurrentUser, session: SessionDep) -> WclConnectionStatus:
+    conn = await wcl_oauth_service.get_connection(session, user.id)
+    if not conn:
+        return WclConnectionStatus(connected=False)
+    return WclConnectionStatus(
+        connected=True,
+        wcl_user_id=conn.wcl_user_id,
+        wcl_user_name=conn.wcl_user_name,
+        expires_at=conn.expires_at,
+        scope=conn.scope,
+    )
+
+
+@router.delete("/me/wcl-connection", status_code=status.HTTP_204_NO_CONTENT)
+async def delete_wcl_connection(user: CurrentUser, session: SessionDep) -> None:
+    await wcl_oauth_service.disconnect(session, user.id)
     await session.commit()

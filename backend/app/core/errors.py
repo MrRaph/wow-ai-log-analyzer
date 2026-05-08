@@ -64,6 +64,15 @@ class UpstreamError(AppError):
     code = "upstream_error"
 
 
+class NoTopLogsError(AppError):
+    """Raised when an analysis is requested but Warcraft Logs has no public
+    top-log entries we can compare against. The frontend renders a friendly
+    "try again later" message rather than a generic AI failure."""
+
+    status_code = status.HTTP_422_UNPROCESSABLE_ENTITY
+    code = "no_top_logs"
+
+
 def register_exception_handlers(app: FastAPI) -> None:
     @app.exception_handler(AppError)
     async def _app_error(_: Request, exc: AppError) -> JSONResponse:

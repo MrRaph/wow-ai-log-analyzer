@@ -48,7 +48,9 @@ services:
       redis:
         condition: service_healthy
     ports:
-      - "${BACKEND_PORT:-8000}:8000"
+      # Bind only to loopback so the reverse proxy on the host (Caddy/nginx)
+      # can reach it but nothing on the public internet can.
+      - "127.0.0.1:${BACKEND_PORT:-8000}:8000"
     healthcheck:
       test: ["CMD", "python", "-c", "import urllib.request,sys; urllib.request.urlopen('http://127.0.0.1:8000/api/v1/health'); sys.exit(0)"]
       interval: 15s
@@ -64,7 +66,7 @@ services:
     environment:
       POSTGRES_HOST: db
       REDIS_HOST: redis
-    command: ["arq", "app.workers.arq_app.WorkerSettings"]
+    command: ["uv", "run", "arq", "app.workers.arq_app.WorkerSettings"]
     depends_on:
       db:
         condition: service_healthy
@@ -85,8 +87,67 @@ services:
     depends_on:
       - backend
     ports:
-      - "3000:3000"
+      - "127.0.0.1:3000:3000"
+
+  # Optional: locally hosted OpenAI-compatible LLM server (llama.cpp). Only
+  # starts when explicitly requested:
+  #   docker compose --profile local-ai up -d
+  # Requires NVIDIA Container Toolkit + driver on the host.
+  #
+  # We use llama.cpp's official server image rather than Ollama because Ollama
+  # bundles a forked llama.cpp that lags behind upstream — bleeding-edge model
+  # architectures (e.g. qwen35moe) only work with the official upstream build.
+  # llama-server downloads the GGUF directly from Hugging Face on first start
+  # and caches it in the llama-cache volume.
+  local-ai:
+    profiles: ["local-ai"]
+    image: ghcr.io/ggml-org/llama.cpp:server-cuda
+    restart: unless-stopped
+    command:
+      - --host
+      - 0.0.0.0
+      - --port
+      - "8080"
+      - --hf-repo
+      - ${LOCAL_AI_HF_REPO:?LOCAL_AI_HF_REPO must be set}
+      - --hf-file
+      - ${LOCAL_AI_HF_FILE:?LOCAL_AI_HF_FILE must be set}
+      - --alias
+      - ${LOCAL_AI_MODEL:?LOCAL_AI_MODEL must be set}
+      - --n-gpu-layers
+      - "999"
+      - --ctx-size
+      - "${LOCAL_AI_CTX_SIZE:-16384}"
+      - --jinja
+    environment:
+      HF_TOKEN: ${HUGGINGFACE_TOKEN:-}
+      LLAMA_CACHE: /cache
+      # The :server-cuda image ships the CUDA backend at /app/libggml-cuda.so
+      # but doesn't set LD_LIBRARY_PATH for it, so the runtime dlopen falls
+      # back to "no usable GPU found". Make the dependent libs reachable:
+      LD_LIBRARY_PATH: /app:/usr/local/cuda/lib64
+    volumes:
+      - llama-cache:/cache
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: ["gpu"]
+    expose:
+      - "8080"
+    healthcheck:
+      # llama-server has /health while loading and /v1/models once ready.
+      test: ["CMD-SHELL", "exec 3<>/dev/tcp/127.0.0.1/8080 && echo -e 'GET /v1/models HTTP/1.1\\r\\nHost: x\\r\\n\\r\\n' >&3 && head -1 <&3 | grep -q '200'"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      # Generous start period: first-run model download (~21 GB for Q4_K_M)
+      # plus model load into VRAM can easily take 10-40 min.
+      start_period: 2400s
 
 volumes:
   postgres-data:
   redis-data:
+  llama-cache:

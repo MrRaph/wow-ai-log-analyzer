@@ -6,6 +6,8 @@ import { use, useEffect, useState } from "react";
 
 import { AuthGuard } from "@/components/AuthGuard";
 import { Button, Card, Input, Label, Select } from "@/components/ui";
+import { TopLogsToolsCard } from "@/components/admin/TopLogsToolsCard";
+import { WowDataCard } from "@/components/admin/WowDataCard";
 import { apiFetch } from "@/lib/api";
 import { formatDateTime } from "@/lib/format";
 import type { Locale } from "@/i18n/config";
@@ -107,15 +109,43 @@ function AdminView({ locale }: { locale: Locale }) {
             <Label>{t("admin.aiProvider")}</Label>
             <Select value={provider} onChange={(e) => setProvider(e.target.value)}>
               <option value="anthropic">Anthropic Claude</option>
+              <option value="openai">OpenAI</option>
+              <option value="local">Local (llama.cpp)</option>
             </Select>
           </div>
           <div>
             <Label>{t("admin.aiModel")}</Label>
-            <Select value={model} onChange={(e) => setModel(e.target.value)}>
-              <option value="claude-sonnet-4-6">claude-sonnet-4-6</option>
-              <option value="claude-opus-4-7">claude-opus-4-7</option>
-              <option value="claude-haiku-4-5-20251001">claude-haiku-4-5</option>
-            </Select>
+            {provider === "local" ? (
+              <input
+                value={model}
+                disabled
+                className="w-full rounded-md border border-bg-3 bg-bg-2 px-3 py-2 text-sm text-zinc-400"
+              />
+            ) : (
+              <Select value={model} onChange={(e) => setModel(e.target.value)}>
+                {provider === "anthropic" && (
+                  <>
+                    <option value="claude-sonnet-4-6">claude-sonnet-4-6</option>
+                    <option value="claude-opus-4-7">claude-opus-4-7</option>
+                    <option value="claude-haiku-4-5-20251001">claude-haiku-4-5</option>
+                  </>
+                )}
+                {provider === "openai" && (
+                  <>
+                    <option value="gpt-4o">gpt-4o</option>
+                    <option value="gpt-4o-mini">gpt-4o-mini</option>
+                    <option value="o1-preview">o1-preview</option>
+                  </>
+                )}
+              </Select>
+            )}
+            {provider === "local" && (
+              <p className="mt-1 text-xs text-zinc-500">
+                {locale === "de"
+                  ? "Modell ist durch LOCAL_AI_MODEL in der .env festgelegt. Zum Wechseln den local-ai Container mit dem neuen Modell neu starten."
+                  : "Model is set by LOCAL_AI_MODEL in .env. To switch, restart the local-ai container with the new value."}
+              </p>
+            )}
           </div>
         </div>
         <div className="mt-4 flex items-center gap-3">
@@ -183,6 +213,9 @@ function AdminView({ locale }: { locale: Locale }) {
           </tbody>
         </table>
       </Card>
+
+      <WowDataCard locale={locale} />
+      <TopLogsToolsCard locale={locale} />
 
       <Card>
         <h2 className="mb-3 text-lg font-semibold">{t("admin.users")}</h2>

@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import { useTranslations } from "next-intl";
-import { use, useEffect, useState } from "react";
+import { Suspense, use, useEffect, useState } from "react";
 
 import { Button, Card, FieldError, Input, Label } from "@/components/ui";
 import { ApiClientError, apiFetch } from "@/lib/api";
@@ -12,6 +12,14 @@ import type { Locale } from "@/i18n/config";
 import type { PublicConfig, TokenPair } from "@/types/api";
 
 export default function RegisterPage({ params }: { params: Promise<{ locale: Locale }> }) {
+  return (
+    <Suspense fallback={null}>
+      <RegisterPageInner params={params} />
+    </Suspense>
+  );
+}
+
+function RegisterPageInner({ params }: { params: Promise<{ locale: Locale }> }) {
   const { locale } = use(params);
   const t = useTranslations();
   const router = useRouter();

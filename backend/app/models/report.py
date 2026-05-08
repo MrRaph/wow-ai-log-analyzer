@@ -67,6 +67,7 @@ class ReportFight(Base):
     boss_percentage: Mapped[float | None] = mapped_column(Float, nullable=True)
     duration_ms: Mapped[int] = mapped_column(BigInteger, nullable=False)
     start_time: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    extras: Mapped[dict] = mapped_column(JSONB, default=dict, nullable=False)
 
     report: Mapped[Report] = relationship(back_populates="fights")
     players: Mapped[list["ReportPlayer"]] = relationship(

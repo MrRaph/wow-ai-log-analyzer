@@ -68,6 +68,40 @@ class AnalysisOut(BaseModel):
     updated_at: datetime
 
 
+class AnalysisListItem(BaseModel):
+    """Compact summary returned by ``GET /analyses`` for the user's history list."""
+
+    model_config = ConfigDict(from_attributes=True)
+
+    id: uuid.UUID
+    status: AnalysisStatus
+    locale: str
+    provider: str
+    model: str
+    created_at: datetime
+    headline: str = ""
+    overall_score: int | None = None
+    role_focus: str | None = None
+    # Just enough to render the list row
+    report_id: uuid.UUID
+    report_code: str
+    fight_id: uuid.UUID
+    fight_name: str = ""
+    fight_name_localized: str | None = None
+    encounter_id: int | None = None
+    player_id: uuid.UUID
+    player_name: str
+    player_class: str
+    player_spec: str
+
+
+class PaginatedAnalyses(BaseModel):
+    items: list[AnalysisListItem]
+    total: int
+    page: int
+    page_size: int
+
+
 class TopLogOut(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
@@ -75,6 +109,7 @@ class TopLogOut(BaseModel):
     spec_slug: str
     encounter_id: int
     encounter_name: str
+    encounter_name_localized: str | None = None
     difficulty: int | None
     metric: str
     rank: int

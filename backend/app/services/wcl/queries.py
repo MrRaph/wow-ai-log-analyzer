@@ -16,7 +16,7 @@ query ReportOverview($code: String!) {
       endTime
       zone { id name }
       region { compactName }
-      gameVersion
+      revision
       fights(killType: All) {
         id
         encounterID
@@ -27,6 +27,7 @@ query ReportOverview($code: String!) {
         bossPercentage
         startTime
         endTime
+        phaseTransitions { id startTime }
       }
     }
   }
@@ -71,8 +72,70 @@ query ReportCasts(
 }
 """
 
-# Top rankings for a given encounter+spec+metric on the world leaderboard.
-# `page` lets us paginate; we typically only fetch page 1 (top 25-50).
+# Buffs *applied to* a specific player during the fight (their personal aura
+# uptime — useful for tracking major CDs, trinket procs, tier-set buffs).
+REPORT_BUFFS_FOR_PLAYER = """
+query ReportBuffs($code: String!, $fightIDs: [Int]!, $sourceID: Int!) {
+  reportData {
+    report(code: $code) {
+      table(fightIDs: $fightIDs, dataType: Buffs, sourceID: $sourceID)
+    }
+  }
+}
+"""
+
+# Debuffs the player has applied to enemies (DoT/debuff uptime — relevant for
+# Affliction Warlocks, Shadow Priests, Subtlety Rogues, etc.).
+REPORT_DEBUFFS_BY_PLAYER = """
+query ReportDebuffs($code: String!, $fightIDs: [Int]!, $sourceID: Int!) {
+  reportData {
+    report(code: $code) {
+      table(fightIDs: $fightIDs, dataType: Debuffs, sourceID: $sourceID)
+    }
+  }
+}
+"""
+
+# Damage *taken* by a player (filtered to enemy sources) — exposes how often
+# a player got hit by avoidable boss mechanics.
+REPORT_DAMAGE_TAKEN_FOR_PLAYER = """
+query ReportDamageTaken(
+  $code: String!,
+  $fightIDs: [Int]!,
+  $targetID: Int!
+) {
+  reportData {
+    report(code: $code) {
+      table(
+        fightIDs: $fightIDs,
+        dataType: DamageTaken,
+        targetID: $targetID,
+        hostilityType: Enemies
+      )
+    }
+  }
+}
+"""
+
+# Per-fight player rankings (parse percentile + ilvl-bracket "best" percentile)
+# for every player in the report. Returns a JSON blob with one entry per fight,
+# split by role (tanks/healers/dps), each containing the ranked characters.
+REPORT_RANKINGS = """
+query ReportRankings(
+  $code: String!,
+  $fightIDs: [Int]!,
+  $playerMetric: ReportRankingMetricType
+) {
+  reportData {
+    report(code: $code) {
+      rankings(fightIDs: $fightIDs, playerMetric: $playerMetric)
+    }
+  }
+}
+"""
+
+
+# Top rankings — extended with serverRegion + difficulty filters.
 ENCOUNTER_RANKINGS = """
 query EncounterRankings(
   $encounterID: Int!,
@@ -80,7 +143,9 @@ query EncounterRankings(
   $className: String,
   $metric: CharacterRankingMetricType!,
   $page: Int!,
-  $partition: Int
+  $partition: Int,
+  $serverRegion: String,
+  $difficulty: Int
 ) {
   worldData {
     encounter(id: $encounterID) {
@@ -91,7 +156,9 @@ query EncounterRankings(
         className: $className,
         metric: $metric,
         page: $page,
-        partition: $partition
+        partition: $partition,
+        serverRegion: $serverRegion,
+        difficulty: $difficulty
       )
     }
   }

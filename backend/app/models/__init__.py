@@ -7,6 +7,8 @@ from app.models.class_spec import GameClass, GameSpec, Role
 from app.models.report import Report, ReportFight, ReportPlayer, ReportPlayerCast, ReportPlayerGear
 from app.models.top_log import TopLog
 from app.models.analysis import Analysis, AnalysisStatus
+from app.models.wcl_connection import UserWclConnection
+from app.models.wow_data import WowDataImport, WowImportStatus, WowLocalization
 
 __all__ = [
     "Analysis",
@@ -25,4 +27,8 @@ __all__ = [
     "TopLog",
     "User",
     "UserRole",
+    "UserWclConnection",
+    "WowDataImport",
+    "WowImportStatus",
+    "WowLocalization",
 ]

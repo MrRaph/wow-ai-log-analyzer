@@ -2,13 +2,21 @@
 
 import { useRouter, useSearchParams } from "next/navigation";
 import { useTranslations } from "next-intl";
-import { use, useState } from "react";
+import { Suspense, use, useState } from "react";
 
 import { Button, Card, FieldError, Input, Label } from "@/components/ui";
 import { ApiClientError, apiFetch } from "@/lib/api";
 import type { Locale } from "@/i18n/config";
 
 export default function AcceptInvitePage({ params }: { params: Promise<{ locale: Locale }> }) {
+  return (
+    <Suspense fallback={null}>
+      <AcceptInvitePageInner params={params} />
+    </Suspense>
+  );
+}
+
+function AcceptInvitePageInner({ params }: { params: Promise<{ locale: Locale }> }) {
   const { locale } = use(params);
   const t = useTranslations();
   const router = useRouter();

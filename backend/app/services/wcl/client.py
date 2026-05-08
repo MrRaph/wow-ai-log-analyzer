@@ -1,15 +1,22 @@
 """Async Warcraft Logs API v2 GraphQL client.
 
-We use the OAuth2 client-credentials flow. The token is cached in-memory until
-60 seconds before its real expiry. All requests are routed through tenacity
-retry with exponential backoff (capped) and respect 429 ``Retry-After`` if
-present.
+Two modes:
+
+- *Client credentials* (default). Uses the OAuth2 client-credentials flow to
+  obtain a token cached in-memory; routes queries to ``/api/v2/client``. Public
+  data only.
+- *User token*. The caller passes a ``user_token_provider`` callable that
+  returns a fresh access token (and is responsible for refreshing). Queries
+  are routed to ``/api/v2/user``, which can see the user's private logs.
+
+All requests use tenacity for retry and respect 429 ``Retry-After``.
 """
 from __future__ import annotations
 
 import asyncio
 import logging
 import time
+from collections.abc import Awaitable, Callable
 from typing import Any
 
 import httpx
@@ -26,6 +33,8 @@ from app.core.errors import UpstreamError
 
 logger = logging.getLogger(__name__)
 
+UserTokenProvider = Callable[[], Awaitable[str]]
+
 
 class WclClient:
     def __init__(
@@ -34,14 +43,18 @@ class WclClient:
         client_id: str | None = None,
         client_secret: str | None = None,
         api_url: str | None = None,
+        user_api_url: str | None = None,
         token_url: str | None = None,
         timeout: float = 30.0,
+        user_token_provider: UserTokenProvider | None = None,
     ) -> None:
         self._client_id = client_id or settings.wcl_client_id
         self._client_secret = client_secret or settings.wcl_client_secret
         self._api_url = api_url or settings.wcl_api_url
+        self._user_api_url = user_api_url or settings.wcl_user_api_url
         self._token_url = token_url or settings.wcl_oauth_token_url
         self._timeout = timeout
+        self._user_token_provider = user_token_provider
         self._token: str | None = None
         self._token_exp: float = 0.0
         self._lock = asyncio.Lock()
@@ -64,9 +77,15 @@ class WclClient:
     async def __aexit__(self, *_: object) -> None:
         await self.aclose()
 
+    @property
+    def uses_user_token(self) -> bool:
+        return self._user_token_provider is not None
+
     # ------------------------------------------------------------------ token
 
     async def _ensure_token(self) -> str:
+        if self._user_token_provider is not None:
+            return await self._user_token_provider()
         async with self._lock:
             now = time.time()
             if self._token and self._token_exp - 60 > now:
@@ -94,6 +113,7 @@ class WclClient:
     async def query(self, gql: str, variables: dict[str, Any] | None = None) -> dict[str, Any]:
         token = await self._ensure_token()
         client = await self._http_client()
+        api_url = self._user_api_url if self.uses_user_token else self._api_url
         retrying = AsyncRetrying(
             stop=stop_after_attempt(4),
             wait=wait_exponential_jitter(initial=1, max=15),
@@ -104,13 +124,14 @@ class WclClient:
         async for attempt in retrying:
             with attempt:
                 resp = await client.post(
-                    self._api_url,
+                    api_url,
                     json={"query": gql, "variables": variables or {}},
                     headers={"Authorization": f"Bearer {token}"},
                 )
                 if resp.status_code == 401:
-                    self._token = None  # force refresh on next call
-                    raise UpstreamError("WCL token rejected; will refresh.")
+                    if not self.uses_user_token:
+                        self._token = None  # force refresh on next call
+                    raise UpstreamError("WCL token rejected.")
                 if resp.status_code == 429:
                     retry_after = float(resp.headers.get("Retry-After", "5"))
                     await asyncio.sleep(retry_after)
@@ -123,5 +144,4 @@ class WclClient:
                     msg = "; ".join(e.get("message", "?") for e in payload["errors"])
                     raise UpstreamError(f"WCL GraphQL error: {msg}")
                 return payload.get("data", {})
-        # Unreachable due to reraise=True above, but mypy needs it.
         raise UpstreamError("WCL query failed without a successful attempt.")

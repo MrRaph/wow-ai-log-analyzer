@@ -13,12 +13,10 @@ from app.models import (
     Report,
     ReportFight,
     ReportPlayer,
-    ReportPlayerCast,
     ReportPlayerGear,
 )
 from app.services.wcl.client import WclClient
 from app.services.wcl.parser import (
-    parse_casts_table,
     parse_damage_done_table,
     parse_deaths_table,
     parse_gear_from_player_details,
@@ -26,11 +24,12 @@ from app.services.wcl.parser import (
     parse_player_details,
     parse_report_input,
     parse_report_overview,
+    parse_report_rankings_for_fight,
 )
 from app.services.wcl.queries import (
-    REPORT_CASTS,
     REPORT_OVERVIEW,
     REPORT_PLAYER_DETAILS,
+    REPORT_RANKINGS,
     REPORT_TABLES,
 )
 
@@ -49,6 +48,9 @@ async def import_report(
     Idempotent: if the report is already cached we update its scalar fields and
     skip the more expensive table queries. Use ``refresh_report`` to force a
     full re-fetch.
+
+    If ``wcl_client`` is omitted and ``owner_user_id`` has a stored WCL OAuth
+    connection, that user's token is used so private logs are accessible.
     """
     code = parse_report_input(raw_input)
     existing = await _get_report_with_data(session, code)
@@ -56,6 +58,10 @@ async def import_report(
         return existing
 
     own_client = wcl_client is None
+    if wcl_client is None and owner_user_id is not None:
+        from app.services.wcl_oauth_service import build_user_wcl_client
+
+        wcl_client = await build_user_wcl_client(session, user_id=owner_user_id)
     client = wcl_client or WclClient()
     try:
         overview = parse_report_overview(await client.query(REPORT_OVERVIEW, {"code": code}))
@@ -76,7 +82,8 @@ async def import_report(
 
         fights_by_id: dict[int, ReportFight] = {}
         for f in overview["fights"]:
-            fight = ReportFight(report_id=report.id, **f)
+            fight_extras = f.pop("extras", {}) or {}
+            fight = ReportFight(report_id=report.id, **f, extras=fight_extras)
             session.add(fight)
             fights_by_id[f["fight_id"]] = fight
         await session.flush()
@@ -115,38 +122,105 @@ async def _populate_players(
     fight_ids: list[int],
     fights_by_id: dict[int, ReportFight],
 ) -> None:
-    details_payload = await client.query(
-        REPORT_PLAYER_DETAILS, {"code": code, "fightIDs": fight_ids}
-    )
-    players = parse_player_details(details_payload)
-    if not players:
-        return
+    """Materialise one ``ReportPlayer`` per (fight, player), with **per-fight**
+    role/spec/dps/hps numbers.
 
-    damage_payload = await client.query(
-        REPORT_TABLES, {"code": code, "fightIDs": fight_ids, "dataType": "DamageDone"}
-    )
-    healing_payload = await client.query(
-        REPORT_TABLES, {"code": code, "fightIDs": fight_ids, "dataType": "Healing"}
-    )
-    deaths_payload = await client.query(
-        REPORT_TABLES, {"code": code, "fightIDs": fight_ids, "dataType": "Deaths"}
-    )
-    damage_by_actor = parse_damage_done_table(damage_payload)
-    healing_by_actor = parse_healing_done_table(healing_payload)
-    deaths_by_actor = parse_deaths_table(deaths_payload)
+    We query playerDetails + DamageDone + Healing + Deaths *per fight* rather
+    than pooling across the whole report, because a single character can play
+    a different spec on different bosses (a monk who tanks Mug'Zee but heals
+    Imperator Averzian). Pooled data assigns the player whatever role they
+    had in *most* of the report, which is wrong on the fights where they
+    swapped — and exactly the case the user wants to analyse.
 
-    # Map every player into *all* fights (each fight gets a row to keep the
-    # schema simple — over time we could specialise per fight, but this keeps
-    # storage small and works for both raid and M+ flows).
-    target_fights = list(fights_by_id.values())
-    for p in players:
-        actor_id = p["actor_id"]
-        damage = damage_by_actor.get(actor_id, {})
-        healing = healing_by_actor.get(actor_id, {})
-        deaths = deaths_by_actor.get(actor_id, 0)
-        gear = parse_gear_from_player_details(p["raw"])
+    Per-fight casts / buffs / debuffs / damage_taken are *deliberately not*
+    fetched here — they're lazy-loaded by the analyser the first time a
+    specific (player, fight) is analysed, and cached on the player row.
+    """
+    for fight_id in fight_ids:
+        fight = fights_by_id.get(fight_id)
+        if fight is None:
+            continue
+        try:
+            details_payload = await client.query(
+                REPORT_PLAYER_DETAILS, {"code": code, "fightIDs": [fight_id]}
+            )
+        except Exception:  # noqa: BLE001
+            logger.exception("playerDetails fetch failed for fight=%s", fight_id)
+            continue
+        players = parse_player_details(details_payload)
+        if not players:
+            continue
 
-        for fight in target_fights:
+        try:
+            damage_payload = await client.query(
+                REPORT_TABLES,
+                {"code": code, "fightIDs": [fight_id], "dataType": "DamageDone"},
+            )
+            damage_by_actor = parse_damage_done_table(damage_payload)
+        except Exception:  # noqa: BLE001
+            logger.exception("DamageDone fetch failed for fight=%s", fight_id)
+            damage_by_actor = {}
+        try:
+            healing_payload = await client.query(
+                REPORT_TABLES,
+                {"code": code, "fightIDs": [fight_id], "dataType": "Healing"},
+            )
+            healing_by_actor = parse_healing_done_table(healing_payload)
+        except Exception:  # noqa: BLE001
+            logger.exception("Healing fetch failed for fight=%s", fight_id)
+            healing_by_actor = {}
+        try:
+            deaths_payload = await client.query(
+                REPORT_TABLES,
+                {"code": code, "fightIDs": [fight_id], "dataType": "Deaths"},
+            )
+            deaths_by_actor = parse_deaths_table(deaths_payload)
+        except Exception:  # noqa: BLE001
+            logger.exception("Deaths fetch failed for fight=%s", fight_id)
+            deaths_by_actor = {}
+
+        # Fetch WCL parse-percentile data for *every* player in this fight
+        # in two calls (one per metric). The dps call gives us tank+dps
+        # rankings, the hps call gives us healer rankings — we read each
+        # player from the bucket matching their per-fight role. The maps
+        # are keyed by lowercased character name (WCL rankings use *global*
+        # character IDs while our ``actor_id`` is report-local).
+        hps_metrics: dict[str, dict[str, Any]] = {}
+        dps_metrics: dict[str, dict[str, Any]] = {}
+        try:
+            hps_payload = await client.query(
+                REPORT_RANKINGS,
+                {"code": code, "fightIDs": [fight_id], "playerMetric": "hps"},
+            )
+            hps_metrics = parse_report_rankings_for_fight(
+                hps_payload, fight_id=fight_id, roles={"healers"}
+            )
+        except Exception:  # noqa: BLE001
+            logger.exception("HPS rankings fetch failed for fight=%s", fight_id)
+        try:
+            dps_payload = await client.query(
+                REPORT_RANKINGS,
+                {"code": code, "fightIDs": [fight_id], "playerMetric": "dps"},
+            )
+            dps_metrics = parse_report_rankings_for_fight(
+                dps_payload, fight_id=fight_id, roles={"dps", "tanks"}
+            )
+        except Exception:  # noqa: BLE001
+            logger.exception("DPS rankings fetch failed for fight=%s", fight_id)
+
+        for p in players:
+            actor_id = p["actor_id"]
+            damage = damage_by_actor.get(actor_id, {})
+            healing = healing_by_actor.get(actor_id, {})
+            deaths = deaths_by_actor.get(actor_id, 0)
+            gear = parse_gear_from_player_details(p["raw"])
+            name_key = (p.get("name") or "").strip().lower()
+            metrics = (
+                hps_metrics.get(name_key)
+                if p["role"] == "healer"
+                else dps_metrics.get(name_key)
+            )
+
             db_player = ReportPlayer(
                 fight_id=fight.id,
                 actor_id=actor_id,
@@ -162,25 +236,24 @@ async def _populate_players(
                 hps=float(healing.get("hps", 0)) or None,
                 deaths=int(deaths),
                 talents_loadout=p.get("talents_loadout"),
-                extras={},
+                extras={
+                    "talent_ids": p.get("talent_ids") or [],
+                    # Always set ``parse_metrics`` (even when WCL has no
+                    # ranking data) so the analyzer's ``has_parse_metrics``
+                    # marker is True and we don't re-fetch later.
+                    "parse_metrics": metrics or {
+                        "rank_percent": None,
+                        "ilvl_percent": None,
+                        "total_parses": None,
+                        "rank": None,
+                        "out_of": None,
+                    },
+                },
             )
             session.add(db_player)
             await session.flush()
             for g in gear:
                 session.add(ReportPlayerGear(player_id=db_player.id, **g))
-
-            # Top abilities (we keep up to 25 to fit the AI prompt comfortably)
-            try:
-                casts_payload = await client.query(
-                    REPORT_CASTS,
-                    {"code": code, "fightIDs": [fight.fight_id], "sourceID": actor_id},
-                )
-                casts = parse_casts_table(casts_payload)
-            except Exception:  # noqa: BLE001
-                logger.exception("Casts query failed for actor=%s fight=%s", actor_id, fight.fight_id)
-                casts = []
-            for c in sorted(casts, key=lambda c: c.get("total", 0), reverse=True)[:25]:
-                session.add(ReportPlayerCast(player_id=db_player.id, **c))
 
     await session.flush()
 

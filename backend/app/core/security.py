@@ -65,3 +65,29 @@ def decode_token(token: str, expected_kind: TokenKind | None = None) -> dict[str
 
 def generate_secure_token(nbytes: int = 32) -> str:
     return secrets.token_urlsafe(nbytes)
+
+
+# --- Short-lived OAuth state tokens --------------------------------------------------
+
+
+def create_state_token(subject: str, *, ttl_minutes: int = 10) -> str:
+    """Sign a short-lived JWT used as the OAuth ``state`` parameter."""
+    now = datetime.now(UTC)
+    payload = {
+        "sub": subject,
+        "iat": int(now.timestamp()),
+        "exp": int((now + timedelta(minutes=ttl_minutes)).timestamp()),
+        "type": "oauth_state",
+        "jti": secrets.token_urlsafe(16),
+    }
+    return jwt.encode(payload, settings.secret_key, algorithm=settings.jwt_algorithm)
+
+
+def decode_state_token(token: str) -> dict[str, Any]:
+    try:
+        data = jwt.decode(token, settings.secret_key, algorithms=[settings.jwt_algorithm])
+    except JWTError as exc:
+        raise AuthError("Invalid or expired state token.") from exc
+    if data.get("type") != "oauth_state":
+        raise AuthError("State token type mismatch.")
+    return data

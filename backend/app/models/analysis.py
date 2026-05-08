@@ -48,7 +48,9 @@ class Analysis(Base, TimestampMixin):
         index=True,
     )
     provider: Mapped[str] = mapped_column(String(32), default="anthropic", nullable=False)
-    model: Mapped[str] = mapped_column(String(64), default="", nullable=False)
+    # Model identifiers can be long (e.g. local Ollama tags like
+    # ``hf.co/<author>/<repo>:<quant>`` easily hit 80+ chars).
+    model: Mapped[str] = mapped_column(String(255), default="", nullable=False)
     summary: Mapped[str] = mapped_column(Text, default="", nullable=False)
     structured: Mapped[dict] = mapped_column(JSONB, default=dict, nullable=False)
     error: Mapped[str | None] = mapped_column(Text, nullable=True)
