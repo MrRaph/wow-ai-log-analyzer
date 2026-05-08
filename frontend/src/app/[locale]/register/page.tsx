@@ -7,6 +7,7 @@ import { useTranslations } from "next-intl";
 import { Suspense, use, useEffect, useState } from "react";
 
 import { AuthShell } from "@/components/AuthShell";
+import { TurnstileWidget, isTurnstileEnabled } from "@/components/TurnstileWidget";
 import { Button, Card, FieldError, Input, Label } from "@/components/ui";
 import { ApiClientError, apiFetch } from "@/lib/api";
 import { setTokens } from "@/lib/auth";
@@ -30,6 +31,7 @@ function RegisterPageInner({ params }: { params: Promise<{ locale: Locale }> }) 
   const [password, setPassword] = useState("");
   const [displayName, setDisplayName] = useState("");
   const [inviteToken, setInviteToken] = useState(search.get("token") ?? "");
+  const [captchaToken, setCaptchaToken] = useState<string | null>(null);
   const [err, setErr] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [allowOpenReg, setAllowOpenReg] = useState<boolean | null>(null);
@@ -47,6 +49,10 @@ function RegisterPageInner({ params }: { params: Promise<{ locale: Locale }> }) 
       setErr(t("auth.passwordsTooShort"));
       return;
     }
+    if (isTurnstileEnabled && !captchaToken) {
+      setErr(t("auth.captchaMissing"));
+      return;
+    }
     setLoading(true);
     try {
       const tokens = await apiFetch<TokenPair>("/api/v1/auth/register", {
@@ -57,6 +63,7 @@ function RegisterPageInner({ params }: { params: Promise<{ locale: Locale }> }) 
           password,
           display_name: displayName,
           invite_token: inviteToken || undefined,
+          captcha_token: captchaToken,
         },
       });
       setTokens(tokens);
@@ -123,6 +130,7 @@ function RegisterPageInner({ params }: { params: Promise<{ locale: Locale }> }) 
               leftIcon={<KeyRound className="h-4 w-4" aria-hidden="true" />}
             />
           </div>
+          <TurnstileWidget onToken={setCaptchaToken} />
           <FieldError>{err}</FieldError>
           <Button type="submit" disabled={loading} className="w-full">
             {loading ? t("common.loading") : t("auth.registerTitle")}

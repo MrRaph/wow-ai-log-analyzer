@@ -96,8 +96,14 @@ class ReportOut(BaseModel):
     zone_name: str
     region: str
     game_version: str
-    start_time: datetime
-    end_time: datetime
+    # Nullable while the worker is still importing the report.
+    start_time: datetime | None
+    end_time: datetime | None
+    # Async-import bookkeeping. ``import_status`` flips ready when the worker
+    # has finished populating fights/players; ``import_error`` carries the
+    # exception message on failure.
+    import_status: str = "ready"
+    import_error: str | None = None
     fights: list[ReportFightOut] = Field(default_factory=list)
 
 
@@ -113,8 +119,9 @@ class ReportSummaryOut(BaseModel):
     wcl_code: str
     title: str
     zone_name: str
-    start_time: datetime
-    end_time: datetime
+    start_time: datetime | None
+    end_time: datetime | None
+    import_status: str = "ready"
 
 
 class PaginatedReports(BaseModel):

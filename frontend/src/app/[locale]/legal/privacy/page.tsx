@@ -13,6 +13,7 @@ const SECTIONS = [
   "wcl",
   "ai",
   "userApiKeys",
+  "captcha",
   "retention",
   "cookies",
   "rights",

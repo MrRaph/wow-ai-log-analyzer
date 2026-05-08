@@ -1,9 +1,12 @@
 "use client";
 
+import { Lock, User } from "lucide-react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { useTranslations } from "next-intl";
 import { Suspense, use, useState } from "react";
 
+import { AuthShell } from "@/components/AuthShell";
+import { TurnstileWidget, isTurnstileEnabled } from "@/components/TurnstileWidget";
 import { Button, Card, FieldError, Input, Label } from "@/components/ui";
 import { ApiClientError, apiFetch } from "@/lib/api";
 import type { Locale } from "@/i18n/config";
@@ -24,6 +27,7 @@ function AcceptInvitePageInner({ params }: { params: Promise<{ locale: Locale }>
   const token = search.get("token") ?? "";
   const [password, setPassword] = useState("");
   const [displayName, setDisplayName] = useState("");
+  const [captchaToken, setCaptchaToken] = useState<string | null>(null);
   const [err, setErr] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
 
@@ -34,12 +38,21 @@ function AcceptInvitePageInner({ params }: { params: Promise<{ locale: Locale }>
       setErr(t("auth.passwordsTooShort"));
       return;
     }
+    if (isTurnstileEnabled && !captchaToken) {
+      setErr(t("auth.captchaMissing"));
+      return;
+    }
     setLoading(true);
     try {
       await apiFetch("/api/v1/auth/accept-invite", {
         method: "POST",
         anonymous: true,
-        body: { token, password, display_name: displayName },
+        body: {
+          token,
+          password,
+          display_name: displayName,
+          captcha_token: captchaToken,
+        },
       });
       router.push(`/${locale}/login`);
     } catch (e) {
@@ -50,7 +63,7 @@ function AcceptInvitePageInner({ params }: { params: Promise<{ locale: Locale }>
   }
 
   return (
-    <div className="container-page mx-auto max-w-md">
+    <AuthShell>
       <Card>
         <h1 className="mb-4 font-display text-2xl font-semibold">{t("auth.acceptInviteTitle")}</h1>
         <form onSubmit={onSubmit} className="space-y-4">
@@ -61,6 +74,7 @@ function AcceptInvitePageInner({ params }: { params: Promise<{ locale: Locale }>
               required
               value={displayName}
               onChange={(e) => setDisplayName(e.target.value)}
+              leftIcon={<User className="h-4 w-4" aria-hidden="true" />}
             />
           </div>
           <div>
@@ -72,14 +86,16 @@ function AcceptInvitePageInner({ params }: { params: Promise<{ locale: Locale }>
               minLength={8}
               value={password}
               onChange={(e) => setPassword(e.target.value)}
+              leftIcon={<Lock className="h-4 w-4" aria-hidden="true" />}
             />
           </div>
+          <TurnstileWidget onToken={setCaptchaToken} />
           <FieldError>{err}</FieldError>
           <Button type="submit" disabled={loading || !token} className="w-full">
             {loading ? t("common.loading") : t("auth.acceptInviteSubmit")}
           </Button>
         </form>
       </Card>
-    </div>
+    </AuthShell>
   );
 }

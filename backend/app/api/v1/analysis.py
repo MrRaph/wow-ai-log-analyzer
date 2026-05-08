@@ -8,9 +8,10 @@ from fastapi import APIRouter, Query, status
 from sqlalchemy import func, or_, select
 
 from app.core.errors import ForbiddenError, NotFoundError
-from app.deps import CurrentUser, LocaleDep, SessionDep
+from app.deps import ArqDep, CurrentUser, LocaleDep, SessionDep
 from app.models import (
     Analysis,
+    AnalysisStatus,
     Report,
     ReportFight,
     ReportPlayer,
@@ -29,28 +30,37 @@ from app.services.wow_data_service import resolve_encounter_names_with_fallback
 router = APIRouter()
 
 
-@router.post("", response_model=AnalysisOut, status_code=status.HTTP_201_CREATED)
+@router.post("", response_model=AnalysisOut, status_code=status.HTTP_202_ACCEPTED)
 async def create_analysis(
     payload: AnalysisIn,
     session: SessionDep,
     user: CurrentUser,
     locale: LocaleDep,
+    arq: ArqDep,
 ) -> AnalysisOut:
-    analysis = await analyzer.request_analysis(
-        session,
+    """Create a pending Analysis row and enqueue the worker to run it.
+
+    Returns 202 with ``status="pending"``. The frontend polls
+    ``GET /analyses/{id}`` until ``status`` is ``succeeded`` or ``failed``.
+    The actual model call (often 30-90s on a local LLM with thinking) runs
+    on the arq worker so the HTTP request returns in milliseconds.
+    """
+    placeholder = Analysis(
+        requested_by_id=user.id,
         report_id=payload.report_id,
         fight_id=payload.fight_id,
         player_id=payload.player_id,
-        requested_by_id=user.id,
         locale=user.locale or locale,
+        status=AnalysisStatus.pending,
+        provider="",
+        model="",
     )
+    session.add(placeholder)
     await session.commit()
-    # ``updated_at`` has ``onupdate=func.now()``, which SQLAlchemy treats as
-    # server-computed → after the commit the column is "expired" and Pydantic
-    # would trigger a sync IO when reading it. Refresh in-place so the model
-    # walk is purely in-memory.
-    await session.refresh(analysis)
-    return AnalysisOut.model_validate(analysis)
+    await session.refresh(placeholder)
+
+    await arq.enqueue_job("run_analysis_task", str(placeholder.id))
+    return AnalysisOut.model_validate(placeholder)
 
 
 @router.get("", response_model=PaginatedAnalyses)

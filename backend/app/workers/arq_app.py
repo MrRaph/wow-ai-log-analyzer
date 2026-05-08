@@ -11,6 +11,8 @@ from arq.connections import RedisSettings
 from arq.cron import cron
 
 from app.config import settings
+from app.workers.tasks.analysis import run_analysis_task
+from app.workers.tasks.report_import import import_report_task
 from app.workers.tasks.top_logs import refresh_all_top_logs
 from app.workers.tasks.wow_data import refresh_wow_data
 
@@ -60,7 +62,12 @@ class WorkerSettings:
     redis_settings = RedisSettings(
         host=settings.redis_host, port=settings.redis_port, database=settings.redis_db
     )
-    functions = [refresh_all_top_logs, refresh_wow_data]
+    functions = [
+        refresh_all_top_logs,
+        refresh_wow_data,
+        import_report_task,
+        run_analysis_task,
+    ]
     cron_jobs = [
         cron(refresh_all_top_logs, name="refresh_all_top_logs", **_cron_kwargs),
         # WoW DBC dumps drop ~daily right after a patch and only every couple
@@ -69,4 +76,14 @@ class WorkerSettings:
         cron(refresh_wow_data, name="refresh_wow_data", weekday=2, hour=3, minute=0),
     ]
     keep_result = 86400
+    # Number of jobs that may run in parallel inside this worker process.
+    # Top-logs refresh, report import and analysis can all coexist; bump
+    # this if you see jobs queueing up.
     max_jobs = 4
+    # Long enough that a slow Anthropic call or a large Mythic raid import
+    # never gets killed mid-flight. arq's default 300s was occasionally
+    # tight on local-AI runs with thinking enabled.
+    job_timeout = 600
+    # Don't retry analysis or import jobs by default — failures are stored
+    # on the row itself and the user can re-trigger from the UI.
+    max_tries = 1

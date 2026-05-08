@@ -4,13 +4,13 @@ from __future__ import annotations
 import uuid
 
 from fastapi import APIRouter, status
-from sqlalchemy import select
+from sqlalchemy import delete, func, select
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 
 from app.config import settings
-from app.core.errors import NotFoundError
+from app.core.errors import ForbiddenError, NotFoundError
 from app.deps import AdminUser, SessionDep
-from app.models import AppSetting, Invite, User
+from app.models import AppSetting, Invite, Report, User, UserRole
 from app.schemas.user import (
     AdminSettingsOut,
     AdminSettingsUpdate,
@@ -112,3 +112,42 @@ async def update_user(
         user.is_active = payload.is_active
     await session.commit()
     return UserOut.model_validate(user)
+
+
+@router.delete("/users/{user_id}", status_code=status.HTTP_204_NO_CONTENT)
+async def delete_user(
+    user_id: uuid.UUID, session: SessionDep, admin: AdminUser
+) -> None:
+    """Hard-delete a user along with all of their data.
+
+    Mirrors ``DELETE /users/me``: owned reports cascade to fights/players/
+    analyses, the WCL connection cascades on the user row. Two safeguards:
+
+    - admins cannot delete themselves (use ``/users/me`` instead, which
+      also tears down the auth session cleanly);
+    - the *last* remaining admin cannot be deleted, so the instance never
+      ends up with zero admins.
+    """
+    if user_id == admin.id:
+        raise ForbiddenError(
+            "Admins cannot delete their own account here. Use the profile "
+            "page to delete your own account."
+        )
+    user = (await session.execute(select(User).where(User.id == user_id))).scalar_one_or_none()
+    if not user:
+        raise NotFoundError("User not found.")
+    if user.role == UserRole.admin:
+        admin_count = (
+            await session.execute(
+                select(func.count(User.id)).where(User.role == UserRole.admin)
+            )
+        ).scalar_one()
+        if admin_count <= 1:
+            raise ForbiddenError(
+                "Cannot delete the last remaining admin — promote another "
+                "user to admin first."
+            )
+    await session.execute(delete(Report).where(Report.owner_user_id == user_id))
+    await session.flush()
+    await session.delete(user)
+    await session.commit()

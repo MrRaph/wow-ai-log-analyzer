@@ -17,6 +17,7 @@ from sqlalchemy import (
     Index,
     Integer,
     String,
+    Text,
     UniqueConstraint,
 )
 from sqlalchemy.dialects.postgresql import JSONB, UUID
@@ -37,11 +38,22 @@ class Report(Base, TimestampMixin):
     )
     zone_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
     zone_name: Mapped[str] = mapped_column(String(128), default="", nullable=False)
-    start_time: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
-    end_time: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    # Nullable for the brief window between skeleton-create (POST /reports/import
+    # returns immediately) and the worker filling in the WCL overview. Existing
+    # reports always have these set.
+    start_time: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    end_time: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     region: Mapped[str] = mapped_column(String(8), default="", nullable=False)
     game_version: Mapped[str] = mapped_column(String(16), default="retail", nullable=False)
     raw_meta: Mapped[dict] = mapped_column(JSONB, default=dict, nullable=False)
+    # Async-import status the worker drives.
+    #   "importing" → skeleton created, worker is fetching from WCL
+    #   "ready"     → fully populated, frontend can render fights/players
+    #   "failed"    → worker raised; ``import_error`` carries the message
+    import_status: Mapped[str] = mapped_column(
+        String(16), default="ready", nullable=False
+    )
+    import_error: Mapped[str | None] = mapped_column(Text, nullable=True)
 
     fights: Mapped[list["ReportFight"]] = relationship(
         back_populates="report", cascade="all, delete-orphan", lazy="selectin"

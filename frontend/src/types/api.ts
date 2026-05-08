@@ -102,6 +102,8 @@ export interface ReportFight {
   players: ReportPlayer[];
 }
 
+export type ReportImportStatus = "importing" | "ready" | "failed";
+
 export interface Report {
   id: string;
   wcl_code: string;
@@ -110,8 +112,10 @@ export interface Report {
   zone_name: string;
   region: string;
   game_version: string;
-  start_time: string;
-  end_time: string;
+  start_time: string | null;
+  end_time: string | null;
+  import_status: ReportImportStatus;
+  import_error: string | null;
   fights: ReportFight[];
 }
 
@@ -120,8 +124,9 @@ export interface ReportSummary {
   wcl_code: string;
   title: string;
   zone_name: string;
-  start_time: string;
-  end_time: string;
+  start_time: string | null;
+  end_time: string | null;
+  import_status: ReportImportStatus;
 }
 
 export interface PaginatedReports {

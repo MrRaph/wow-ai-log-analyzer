@@ -441,8 +441,14 @@ async def request_analysis(
     requested_by_id: uuid.UUID | None,
     locale: str,
     provider: AiProvider | None = None,
+    analysis_id: uuid.UUID | None = None,
 ) -> Analysis:
-    """Create + run an analysis synchronously and return it."""
+    """Create + run an analysis and return it.
+
+    When ``analysis_id`` is supplied (worker path), we mutate that pre-
+    existing pending row instead of creating a new one. Otherwise the legacy
+    path creates a fresh row — kept so nothing else has to change.
+    """
     stmt = (
         select(ReportPlayer)
         .where(ReportPlayer.id == player_id)
@@ -657,17 +663,28 @@ async def request_analysis(
 
     chosen_provider = await _resolve_provider_choice(session)
     chosen_model = await _resolve_model(session, chosen_provider)
-    analysis = Analysis(
-        requested_by_id=requested_by_id,
-        report_id=report.id,
-        fight_id=fight.id,
-        player_id=player.id,
-        locale=locale,
-        status=AnalysisStatus.running,
-        provider=chosen_provider,
-        model=chosen_model,
-    )
-    session.add(analysis)
+    if analysis_id is not None:
+        # Worker path: take over the pending row instead of creating a fresh one.
+        analysis = (
+            await session.execute(select(Analysis).where(Analysis.id == analysis_id))
+        ).scalar_one_or_none()
+        if analysis is None:
+            raise NotFoundError("Analysis row was deleted before the worker picked it up.")
+        analysis.status = AnalysisStatus.running
+        analysis.provider = chosen_provider
+        analysis.model = chosen_model
+    else:
+        analysis = Analysis(
+            requested_by_id=requested_by_id,
+            report_id=report.id,
+            fight_id=fight.id,
+            player_id=player.id,
+            locale=locale,
+            status=AnalysisStatus.running,
+            provider=chosen_provider,
+            model=chosen_model,
+        )
+        session.add(analysis)
     await session.flush()
 
     used_provider = provider or _provider_for(chosen_provider)

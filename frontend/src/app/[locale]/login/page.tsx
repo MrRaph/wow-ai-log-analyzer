@@ -7,6 +7,7 @@ import { useTranslations } from "next-intl";
 import { use, useState } from "react";
 
 import { AuthShell } from "@/components/AuthShell";
+import { TurnstileWidget, isTurnstileEnabled } from "@/components/TurnstileWidget";
 import { Button, Card, FieldError, Input, Label } from "@/components/ui";
 import { ApiClientError, apiFetch } from "@/lib/api";
 import { setTokens } from "@/lib/auth";
@@ -19,18 +20,23 @@ export default function LoginPage({ params }: { params: Promise<{ locale: Locale
   const router = useRouter();
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
+  const [captchaToken, setCaptchaToken] = useState<string | null>(null);
   const [err, setErr] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
 
   async function onSubmit(e: React.FormEvent) {
     e.preventDefault();
+    if (isTurnstileEnabled && !captchaToken) {
+      setErr(t("auth.captchaMissing"));
+      return;
+    }
     setErr(null);
     setLoading(true);
     try {
       const tokens = await apiFetch<TokenPair>("/api/v1/auth/login", {
         method: "POST",
         anonymous: true,
-        body: { email, password },
+        body: { email, password, captcha_token: captchaToken },
       });
       setTokens(tokens);
       router.push(`/${locale}/analyze`);
@@ -70,6 +76,7 @@ export default function LoginPage({ params }: { params: Promise<{ locale: Locale
               leftIcon={<Lock className="h-4 w-4" aria-hidden="true" />}
             />
           </div>
+          <TurnstileWidget onToken={setCaptchaToken} />
           <FieldError>{err}</FieldError>
           <Button type="submit" disabled={loading} className="w-full">
             {loading ? t("common.loading") : t("auth.loginTitle")}

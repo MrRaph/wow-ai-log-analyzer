@@ -36,27 +36,60 @@ from app.services.wcl.queries import (
 logger = logging.getLogger(__name__)
 
 
-async def import_report(
-    session: AsyncSession,
-    *,
-    raw_input: str,
-    owner_user_id: Any | None,
-    wcl_client: WclClient | None = None,
+async def create_import_skeleton(
+    session: AsyncSession, *, raw_input: str, owner_user_id: Any | None
 ) -> Report:
-    """Fetch a WCL report and persist its overview + per-fight player rollups.
+    """Quickly insert (or return) a Report row in ``importing`` state.
 
-    Idempotent: if the report is already cached we update its scalar fields and
-    skip the more expensive table queries. Use ``refresh_report`` to force a
-    full re-fetch.
+    The HTTP endpoint calls this synchronously so it can return immediately
+    with a stable ``report.id`` the frontend can poll. The actual WCL fetch
+    happens in :func:`run_report_import` on the arq worker.
 
-    If ``wcl_client`` is omitted and ``owner_user_id`` has a stored WCL OAuth
-    connection, that user's token is used so private logs are accessible.
+    Idempotent: re-importing a code that is already in the DB returns the
+    existing row (whether ``importing``/``ready``/``failed``). For ``failed``
+    rows the caller may want to re-trigger the worker — that's handled at
+    the API layer, not here.
     """
     code = parse_report_input(raw_input)
-    existing = await _get_report_with_data(session, code)
-    if existing:
+    existing = (
+        await session.execute(select(Report).where(Report.wcl_code == code))
+    ).scalar_one_or_none()
+    if existing is not None:
         return existing
+    report = Report(
+        wcl_code=code,
+        title="",
+        owner_user_id=owner_user_id,
+        import_status="importing",
+        raw_meta={},
+    )
+    session.add(report)
+    await session.flush()
+    return report
 
+
+async def run_report_import(
+    session: AsyncSession,
+    *,
+    report_id: Any,
+    wcl_client: WclClient | None = None,
+) -> None:
+    """Fetch the WCL overview + per-fight player rollups for a skeleton report.
+
+    Drives ``import_status``: ``importing`` → ``ready`` (or ``failed`` on
+    exception). Idempotent — calling on a ``ready`` row that already has
+    fights does nothing besides refreshing the status.
+    """
+    report = (
+        await session.execute(select(Report).where(Report.id == report_id))
+    ).scalar_one_or_none()
+    if report is None:
+        raise NotFoundError("Report not found.")
+    if report.import_status == "ready" and report.start_time is not None:
+        return  # already populated; nothing to do
+
+    code = report.wcl_code
+    owner_user_id = report.owner_user_id
     own_client = wcl_client is None
     if wcl_client is None and owner_user_id is not None:
         from app.services.wcl_oauth_service import build_user_wcl_client
@@ -65,19 +98,13 @@ async def import_report(
     client = wcl_client or WclClient()
     try:
         overview = parse_report_overview(await client.query(REPORT_OVERVIEW, {"code": code}))
-        report = Report(
-            wcl_code=overview["wcl_code"],
-            title=overview["title"],
-            owner_user_id=owner_user_id,
-            zone_id=overview["zone_id"],
-            zone_name=overview["zone_name"],
-            region=overview["region"],
-            game_version=overview["game_version"],
-            start_time=overview["start_time"],
-            end_time=overview["end_time"],
-            raw_meta={},
-        )
-        session.add(report)
+        report.title = overview["title"]
+        report.zone_id = overview["zone_id"]
+        report.zone_name = overview["zone_name"]
+        report.region = overview["region"]
+        report.game_version = overview["game_version"]
+        report.start_time = overview["start_time"]
+        report.end_time = overview["end_time"]
         await session.flush()
 
         fights_by_id: dict[int, ReportFight] = {}
@@ -88,15 +115,15 @@ async def import_report(
             fights_by_id[f["fight_id"]] = fight
         await session.flush()
 
-        # Group fights into a single batched table call.
         all_fight_ids = list(fights_by_id.keys())
         if all_fight_ids:
             await _populate_players(session, client, code, all_fight_ids, fights_by_id)
+
+        report.import_status = "ready"
+        report.import_error = None
     finally:
         if own_client:
             await client.aclose()
-
-    return await _get_report_with_data(session, code) or report
 
 
 async def _get_report_with_data(session: AsyncSession, code: str) -> Report | None:

@@ -1,6 +1,7 @@
 "use client";
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { Trash2 } from "lucide-react";
 import { useTranslations } from "next-intl";
 import { use, useEffect, useState } from "react";
 
@@ -8,7 +9,7 @@ import { AuthGuard } from "@/components/AuthGuard";
 import { Button, Card, Input, Label, Select } from "@/components/ui";
 import { TopLogsToolsCard } from "@/components/admin/TopLogsToolsCard";
 import { WowDataCard } from "@/components/admin/WowDataCard";
-import { apiFetch } from "@/lib/api";
+import { ApiClientError, apiFetch } from "@/lib/api";
 import { formatDateTime } from "@/lib/format";
 import type { Locale } from "@/i18n/config";
 import type { AdminSettings, Invite, UserOut } from "@/types/api";
@@ -17,12 +18,12 @@ export default function AdminPage({ params }: { params: Promise<{ locale: Locale
   const { locale } = use(params);
   return (
     <AuthGuard locale={locale} requireAdmin>
-      {() => <AdminView locale={locale} />}
+      {(currentUser) => <AdminView locale={locale} currentUserId={currentUser.id} />}
     </AuthGuard>
   );
 }
 
-function AdminView({ locale }: { locale: Locale }) {
+function AdminView({ locale, currentUserId }: { locale: Locale; currentUserId: string }) {
   const t = useTranslations();
   const qc = useQueryClient();
 
@@ -82,6 +83,15 @@ function AdminView({ locale }: { locale: Locale }) {
     mutationFn: ({ id, payload }: { id: string; payload: Record<string, unknown> }) =>
       apiFetch<UserOut>(`/api/v1/admin/users/${id}`, { method: "PATCH", body: payload }),
     onSuccess: () => qc.invalidateQueries({ queryKey: ["admin-users"] }),
+  });
+
+  const deleteUserMut = useMutation({
+    mutationFn: (id: string) =>
+      apiFetch(`/api/v1/admin/users/${id}`, { method: "DELETE" }),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["admin-users"] }),
+    onError: (e) => {
+      window.alert(e instanceof ApiClientError ? e.message : t("errors.generic"));
+    },
   });
 
   return (
@@ -217,48 +227,85 @@ function AdminView({ locale }: { locale: Locale }) {
       <WowDataCard locale={locale} />
       <TopLogsToolsCard locale={locale} />
 
-      <Card>
-        <h2 className="mb-3 text-lg font-semibold">{t("admin.users")}</h2>
-        <table className="w-full text-sm">
-          <thead className="text-xs uppercase tracking-wide text-zinc-400">
-            <tr>
-              <th className="px-2 py-2 text-left">{t("auth.email")}</th>
-              <th className="px-2 py-2 text-left">{t("auth.displayName")}</th>
-              <th className="px-2 py-2 text-left">{t("admin.role")}</th>
-              <th className="px-2 py-2 text-left">{t("admin.active")}</th>
-            </tr>
-          </thead>
-          <tbody>
-            {(usersQ.data ?? []).map((u) => (
-              <tr key={u.id} className="border-t border-bg-3">
-                <td className="px-2 py-2">{u.email}</td>
-                <td className="px-2 py-2">{u.display_name}</td>
-                <td className="px-2 py-2">
-                  <Select
-                    value={u.role}
-                    onChange={(e) =>
-                      updateUserMut.mutate({ id: u.id, payload: { role: e.target.value } })
-                    }
-                    className="!w-32"
-                  >
-                    <option value="user">user</option>
-                    <option value="admin">admin</option>
-                  </Select>
-                </td>
-                <td className="px-2 py-2">
-                  <input
-                    type="checkbox"
-                    checked={u.is_active}
-                    onChange={(e) =>
-                      updateUserMut.mutate({ id: u.id, payload: { is_active: e.target.checked } })
-                    }
-                    className="h-4 w-4 accent-amber-500"
-                  />
-                </td>
+      <Card className="!p-0 overflow-hidden">
+        <div className="px-5 pt-5">
+          <h2 className="mb-3 text-lg font-semibold">{t("admin.users")}</h2>
+        </div>
+        <div className="overflow-x-auto">
+          <table className="w-full min-w-[640px] text-sm">
+            <thead className="text-xs uppercase tracking-wide text-zinc-400">
+              <tr>
+                <th className="px-3 py-2 text-left">{t("auth.email")}</th>
+                <th className="px-3 py-2 text-left">{t("auth.displayName")}</th>
+                <th className="px-3 py-2 text-left">{t("admin.role")}</th>
+                <th className="px-3 py-2 text-left">{t("admin.active")}</th>
+                <th className="px-3 py-2 text-right"></th>
               </tr>
-            ))}
-          </tbody>
-        </table>
+            </thead>
+            <tbody>
+              {(usersQ.data ?? []).map((u) => {
+                const isSelf = u.id === currentUserId;
+                const isDeleting =
+                  deleteUserMut.isPending && deleteUserMut.variables === u.id;
+                return (
+                  <tr key={u.id} className="border-t border-bg-3">
+                    <td className="px-3 py-2">{u.email}</td>
+                    <td className="px-3 py-2">{u.display_name}</td>
+                    <td className="px-3 py-2">
+                      <Select
+                        value={u.role}
+                        onChange={(e) =>
+                          updateUserMut.mutate({ id: u.id, payload: { role: e.target.value } })
+                        }
+                        className="!w-32"
+                      >
+                        <option value="user">user</option>
+                        <option value="admin">admin</option>
+                      </Select>
+                    </td>
+                    <td className="px-3 py-2">
+                      <input
+                        type="checkbox"
+                        checked={u.is_active}
+                        onChange={(e) =>
+                          updateUserMut.mutate({
+                            id: u.id,
+                            payload: { is_active: e.target.checked },
+                          })
+                        }
+                        className="h-4 w-4 accent-amber-500"
+                      />
+                    </td>
+                    <td className="px-3 py-2 text-right">
+                      <Button
+                        size="sm"
+                        variant="danger"
+                        disabled={isSelf || isDeleting}
+                        title={
+                          isSelf
+                            ? t("admin.deleteUserSelfHint")
+                            : t("admin.deleteUserButton")
+                        }
+                        aria-label={t("admin.deleteUserButton")}
+                        onClick={() => {
+                          if (
+                            window.confirm(
+                              t("admin.deleteUserConfirm", { email: u.email }),
+                            )
+                          ) {
+                            deleteUserMut.mutate(u.id);
+                          }
+                        }}
+                      >
+                        {isDeleting ? "…" : <Trash2 className="h-4 w-4" aria-hidden="true" />}
+                      </Button>
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
       </Card>
     </div>
   );

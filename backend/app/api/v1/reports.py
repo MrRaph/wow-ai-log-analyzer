@@ -8,7 +8,7 @@ from sqlalchemy import func, select
 from sqlalchemy.orm import selectinload
 
 from app.core.errors import ForbiddenError, NotFoundError
-from app.deps import CurrentUser, LocaleDep, SessionDep
+from app.deps import ArqDep, CurrentUser, LocaleDep, SessionDep
 from app.models import Report, ReportFight, ReportPlayer, UserRole
 from app.schemas.report import (
     PaginatedReports,
@@ -45,14 +45,42 @@ def _serialize_report(report: Report, encounter_name_map: dict[int, str]) -> Rep
     return out
 
 
-@router.post("/import", response_model=ReportOut, status_code=status.HTTP_201_CREATED)
+@router.post("/import", response_model=ReportOut, status_code=status.HTTP_202_ACCEPTED)
 async def import_report(
-    payload: ReportImportIn, session: SessionDep, user: CurrentUser, locale: LocaleDep
+    payload: ReportImportIn,
+    session: SessionDep,
+    user: CurrentUser,
+    locale: LocaleDep,
+    arq: ArqDep,
 ) -> ReportOut:
-    report = await report_service.import_report(
-        session, raw_input=payload.wcl_url_or_code, owner_user_id=user.id
+    """Create a skeleton Report row and enqueue the worker to populate it.
+
+    Returns 202 Accepted with the row in ``import_status="importing"``.
+    The frontend polls ``GET /reports/{id}`` until ``import_status`` flips
+    to ``ready`` (or ``failed`` with ``import_error``).
+    """
+    report = await report_service.create_import_skeleton(
+        session,
+        raw_input=payload.wcl_url_or_code,
+        owner_user_id=user.id,
     )
+    # If a previous attempt failed, allow re-trigger by flipping back to
+    # importing on the same row before enqueueing.
+    if report.import_status == "failed":
+        report.import_status = "importing"
+        report.import_error = None
     await session.commit()
+    # Eager-load the fights relationship explicitly. After commit, SQLAlchemy
+    # expires every attribute on the row, so the next pydantic access would
+    # trigger a sync IO lazy-load (→ MissingGreenlet under asyncpg). On a
+    # skeleton this just resolves to ``[]``; on a re-imported existing row
+    # it pulls the previously-cached fights in one query.
+    await session.refresh(report, attribute_names=["fights"])
+
+    if report.import_status == "importing":
+        await arq.enqueue_job("import_report_task", str(report.id))
+        return _serialize_report(report, {})
+
     name_map = await _localize_fight_names(session, report, user.locale or locale)
     return _serialize_report(report, name_map)
 

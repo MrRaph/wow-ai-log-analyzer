@@ -52,11 +52,14 @@ function ProfileView({ user, locale }: { user: UserOut; locale: Locale }) {
     },
   });
 
-  const deactivateMut = useMutation({
+  const deleteAccountMut = useMutation({
     mutationFn: () => apiFetch("/api/v1/users/me", { method: "DELETE" }),
     onSuccess: () => {
       clearAuth();
       router.replace(`/${locale}`);
+    },
+    onError: (e) => {
+      setErr(e instanceof ApiClientError ? e.message : t("errors.generic"));
     },
   });
 
@@ -121,10 +124,25 @@ function ProfileView({ user, locale }: { user: UserOut; locale: Locale }) {
       <Suspense fallback={null}>
         <WclConnectionPanel locale={locale} />
       </Suspense>
-      <Card>
-        <h2 className="mb-2 font-semibold">{t("profile.deleteAccount")}</h2>
-        <Button variant="danger" onClick={() => deactivateMut.mutate()} disabled={deactivateMut.isPending}>
-          {t("profile.deleteAccount")}
+      <Card className="border-red-500/30">
+        <h2 className="mb-1 font-semibold text-red-300">
+          {t("profile.deleteAccountHeading")}
+        </h2>
+        <p className="mb-3 text-sm text-zinc-400">
+          {t("profile.deleteAccountWarning")}
+        </p>
+        <Button
+          variant="danger"
+          onClick={() => {
+            if (window.confirm(t("profile.deleteAccountConfirm"))) {
+              deleteAccountMut.mutate();
+            }
+          }}
+          disabled={deleteAccountMut.isPending}
+        >
+          {deleteAccountMut.isPending
+            ? t("common.loading")
+            : t("profile.deleteAccountButton")}
         </Button>
       </Card>
     </div>

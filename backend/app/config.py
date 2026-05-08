@@ -120,6 +120,15 @@ class Settings(BaseSettings):
     # --- Feature flags ---
     allow_registration: bool = True
 
+    # --- Captcha (Cloudflare Turnstile, optional) ---
+    # Enable Turnstile checks on login, register, forgot-password and accept-
+    # invite endpoints. When False the backend skips verification entirely; the
+    # frontend reads the same flag from PublicConfig and skips rendering the
+    # widget. When True, ``turnstile_site_key`` must be set on the frontend
+    # (NEXT_PUBLIC_TURNSTILE_SITE_KEY) and ``turnstile_secret_key`` here.
+    turnstile_enabled: bool = False
+    turnstile_secret_key: str = ""
+
     # ---- derived ----
     @computed_field  # type: ignore[misc]
     @property

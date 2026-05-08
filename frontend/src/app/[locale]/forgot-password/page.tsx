@@ -1,8 +1,11 @@
 "use client";
 
+import { Mail } from "lucide-react";
 import { useTranslations } from "next-intl";
 import { use, useState } from "react";
 
+import { AuthShell } from "@/components/AuthShell";
+import { TurnstileWidget, isTurnstileEnabled } from "@/components/TurnstileWidget";
 import { Button, Card, FieldError, Input, Label } from "@/components/ui";
 import { ApiClientError, apiFetch } from "@/lib/api";
 import type { Locale } from "@/i18n/config";
@@ -11,12 +14,17 @@ export default function ForgotPasswordPage({ params }: { params: Promise<{ local
   const { locale } = use(params);
   const t = useTranslations();
   const [email, setEmail] = useState("");
+  const [captchaToken, setCaptchaToken] = useState<string | null>(null);
   const [done, setDone] = useState(false);
   const [err, setErr] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
 
   async function onSubmit(e: React.FormEvent) {
     e.preventDefault();
+    if (isTurnstileEnabled && !captchaToken) {
+      setErr(t("auth.captchaMissing"));
+      return;
+    }
     setErr(null);
     setLoading(true);
     try {
@@ -24,7 +32,7 @@ export default function ForgotPasswordPage({ params }: { params: Promise<{ local
         method: "POST",
         anonymous: true,
         locale,
-        body: { email },
+        body: { email, captcha_token: captchaToken },
       });
       setDone(true);
     } catch (e) {
@@ -35,7 +43,7 @@ export default function ForgotPasswordPage({ params }: { params: Promise<{ local
   }
 
   return (
-    <div className="container-page mx-auto max-w-md">
+    <AuthShell>
       <Card>
         <h1 className="mb-4 font-display text-2xl font-semibold">{t("auth.resetTitle")}</h1>
         {done ? (
@@ -50,8 +58,10 @@ export default function ForgotPasswordPage({ params }: { params: Promise<{ local
                 required
                 value={email}
                 onChange={(e) => setEmail(e.target.value)}
+                leftIcon={<Mail className="h-4 w-4" aria-hidden="true" />}
               />
             </div>
+            <TurnstileWidget onToken={setCaptchaToken} />
             <FieldError>{err}</FieldError>
             <Button type="submit" disabled={loading} className="w-full">
               {loading ? t("common.loading") : t("common.submit")}
@@ -59,6 +69,6 @@ export default function ForgotPasswordPage({ params }: { params: Promise<{ local
           </form>
         )}
       </Card>
-    </div>
+    </AuthShell>
   );
 }

@@ -2,10 +2,12 @@
 from __future__ import annotations
 
 from fastapi import APIRouter, status
+from sqlalchemy import delete
 
 from app.core.errors import AuthError, ValidationAppError
 from app.core.security import hash_password, verify_password
 from app.deps import CurrentUser, SessionDep
+from app.models import Report
 from app.schemas.user import UserOut, UserUpdateMe
 from app.schemas.wcl import WclConnectionStatus
 from app.services import wcl_oauth_service
@@ -36,7 +38,17 @@ async def update_me(payload: UserUpdateMe, user: CurrentUser, session: SessionDe
 
 @router.delete("/me", status_code=status.HTTP_204_NO_CONTENT)
 async def delete_me(user: CurrentUser, session: SessionDep) -> None:
-    user.is_active = False
+    """Hard-delete the caller's account and *all* of their data (DSGVO Art. 17).
+
+    Owned reports are deleted explicitly so the ``ON DELETE CASCADE`` chain
+    walks down through fights, players, gear, casts and analyses. The
+    ``WclConnection`` row goes away with the user itself (its FK already
+    cascades). Invites the user *created* keep their rows but lose the
+    ``created_by`` link (FK is ``ON DELETE SET NULL``).
+    """
+    await session.execute(delete(Report).where(Report.owner_user_id == user.id))
+    await session.flush()
+    await session.delete(user)
     await session.commit()
 
 

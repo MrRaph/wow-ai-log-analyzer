@@ -4,10 +4,13 @@ from __future__ import annotations
 from collections.abc import AsyncIterator
 from typing import Annotated
 
+from arq import ArqRedis, create_pool
+from arq.connections import RedisSettings
 from fastapi import Depends, Header
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.config import settings
 from app.core.errors import AuthError, ForbiddenError
 from app.core.i18n import locale_dependency
 from app.core.security import decode_token
@@ -16,6 +19,28 @@ from app.models import User, UserRole
 
 SessionDep = Annotated[AsyncSession, Depends(get_session)]
 LocaleDep = Annotated[str, Depends(locale_dependency)]
+
+
+# ----- arq job-queue pool ----------------------------------------------------
+
+_arq_pool: ArqRedis | None = None
+
+
+async def get_arq_pool() -> ArqRedis:
+    """Lazily-built singleton arq client used by API endpoints to enqueue jobs."""
+    global _arq_pool
+    if _arq_pool is None:
+        _arq_pool = await create_pool(
+            RedisSettings(
+                host=settings.redis_host,
+                port=settings.redis_port,
+                database=settings.redis_db,
+            )
+        )
+    return _arq_pool
+
+
+ArqDep = Annotated[ArqRedis, Depends(get_arq_pool)]
 
 
 async def _resolve_bearer(authorization: str | None) -> str:

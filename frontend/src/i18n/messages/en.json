@@ -44,13 +44,17 @@
     "inviteRequired": "Invitation token (required when registration is closed)",
     "acceptInviteTitle": "Accept invitation",
     "acceptInviteSubmit": "Create account",
-    "passwordsTooShort": "Password must be at least 8 characters."
+    "passwordsTooShort": "Password must be at least 8 characters.",
+    "captchaMissing": "Please complete the captcha first."
   },
   "analyze": {
     "title": "Analyze a Warcraft Logs report",
     "subtitle": "Paste a WCL link or report code. We'll cache the report and let you ask the AI for an analysis per fight and player.",
     "input": "https://www.warcraftlogs.com/reports/...",
     "import": "Import report",
+    "importRunning": "Importing report…",
+    "importRunningHint": "Pulling all fights and players from Warcraft Logs. This takes anywhere from seconds to a couple of minutes depending on raid length — you can leave the page open, it updates itself.",
+    "importFailed": "Import failed.",
     "fights": "Fights",
     "players": "Players",
     "noReports": "No reports yet. Paste a WCL link above to get started.",
@@ -59,7 +63,7 @@
     "deleteReport": "Delete",
     "confirmDeleteReport": "Delete this report and all its analyses?",
     "analyseThis": "Analyze this player",
-    "analysisRunning": "Asking the AI… this can take 20-60 seconds.",
+    "analysisRunning": "AI is thinking… typically 1-3 minutes on a local reasoning model, longer on heavy raid pulls. Leave the page open, it will refresh itself.",
     "analysisFailed": "The AI request failed.",
     "headline": "Headline",
     "score": "Score",
@@ -80,7 +84,7 @@
     "noTopLogs": "No top-log reference data cached for this spec/encounter yet. Ask an admin to refresh.",
     "noTopLogsErr": "Warcraft Logs has no public top-log entries for this spec on this boss yet (very new boss or low log volume). The analysis was skipped because there is nothing to compare against. Please try again in a few days once more public logs have been uploaded.",
     "recentAnalyses": "Recent analyses",
-    "recentAnalysesEmpty": "No analyses yet — pick a player above to run your first.",
+    "recentAnalysesEmpty": "No analyses yet — import a WCL report above, open a fight and run an analysis on a player.",
     "loadAnalysis": "Load",
     "deleteAnalysis": "Delete",
     "confirmDeleteAnalysis": "Delete this analysis permanently?",
@@ -115,6 +119,9 @@
     "users": "Users",
     "role": "Role",
     "active": "Active",
+    "deleteUserButton": "Delete user",
+    "deleteUserConfirm": "Permanently delete user {email} along with all their reports and analyses?",
+    "deleteUserSelfHint": "Delete your own account from your profile page, not here.",
     "invites": "Invitations",
     "newInviteEmail": "Email to invite",
     "sendInvite": "Send invitation",
@@ -154,7 +161,11 @@
     "title": "Your profile",
     "language": "Preferred language",
     "changePassword": "Change password",
-    "deleteAccount": "Deactivate account",
+    "deleteAccount": "Delete account",
+    "deleteAccountHeading": "Delete account",
+    "deleteAccountWarning": "Your account and everything linked to it (imported reports, AI analyses, Warcraft Logs connection) will be permanently deleted. This action cannot be undone.",
+    "deleteAccountConfirm": "Really delete your account and all data permanently?",
+    "deleteAccountButton": "Permanently delete account",
     "wclSection": "Warcraft Logs connection",
     "wclSectionHelp": "Connecting your WCL account lets the analyzer read your private and unlisted reports. Without it, only logs you've published publicly on warcraftlogs.com can be analysed.",
     "wclConnect": "Connect Warcraft Logs",
@@ -233,24 +244,28 @@
         "heading": "9. Bringing your own AI endpoint (planned feature)",
         "body": "A future version is planned to let you store your own API key for an external AI service (e.g. OpenAI, an Ollama endpoint, or any OpenAI-compatible provider) in your profile. In that case, analysis requests would be sent directly to the provider you choose; the API key would be stored encrypted in our database. Under data-protection law, you would be responsible in that mode for picking a provider that meets your requirements — we would only forward the requests and would not transmit any additional personal data. This feature is not currently active; once it ships we will update this policy accordingly."
       },
+      "captcha": {
+        "heading": "10. Bot protection on auth forms (Cloudflare Turnstile, optional)",
+        "body": "When enabled on this instance, we protect the sign-in, registration, password-reset and accept-invite forms with Cloudflare Turnstile (provider: Cloudflare, Inc., 101 Townsend St, San Francisco, CA 94107, USA). Turnstile replaces classic captchas and uses technical browser signals to score whether a request is human or automated.\n\nThe following data is transmitted to Cloudflare in the process: your IP address, user-agent string, HTTP request headers, a short-lived cookie / local-storage identifier for the verification session, and aggregate browser behaviour signals (e.g. mouse / keyboard activity). We do not set persistent identifying cookies ourselves; Cloudflare sets short-lived cookies of its own for the verification (typical lifetime 30 min.).\n\nLegal basis is Art. 6 (1) (f) GDPR (legitimate interest in protecting our auth endpoints from automated abuse). The transfer to the United States is covered by the EU Standard Contractual Clauses Cloudflare has executed with its group entities. For details see Cloudflare's privacy policy at https://www.cloudflare.com/privacypolicy/ and the supplementary notes for Turnstile at https://www.cloudflare.com/application-services/products/turnstile/.\n\nIf Turnstile is not enabled on this instance (the default), this processing does not occur."
+      },
       "retention": {
-        "heading": "10. Retention",
+        "heading": "11. Retention",
         "body": "• Account data: as long as your account is active. When the account is deleted, all associated data (reports, analyses, WCL tokens) is automatically removed via cascading deletes.\n• Imported reports and analyses: until you delete them yourself or remove your account.\n• Cached top logs: up to 90 days; they are automatically replaced by new refreshes.\n• Server logs: at most 14 days, for security and diagnostics."
       },
       "cookies": {
-        "heading": "11. Cookies, local storage",
+        "heading": "12. Cookies, local storage",
         "body": "We do not set tracking cookies or advertising cookies. Your browser's local storage holds only technically necessary data: your session tokens (JWT) and a cached copy of your profile so the sign-in experience stays smooth. You can clear this data at any time by signing out or wiping your browser storage."
       },
       "rights": {
-        "heading": "12. Your rights",
+        "heading": "13. Your rights",
         "body": "Under the GDPR you have, in particular, the following rights:\n• Right of access (Art. 15)\n• Right to rectification (Art. 16)\n• Right to erasure / \"right to be forgotten\" (Art. 17)\n• Right to restriction of processing (Art. 18)\n• Right to data portability (Art. 20)\n• Right to object to processing based on Art. 6 (1) (f) (Art. 21)\n• Right to withdraw consent given, with effect for the future (Art. 7 (3))\n\nYou can exercise these rights via the contact email address listed in the imprint. You can also delete your account directly from your profile."
       },
       "complaint": {
-        "heading": "13. Right to lodge a complaint",
+        "heading": "14. Right to lodge a complaint",
         "body": "You have the right to lodge a complaint with a data-protection supervisory authority if you believe that the processing of your data infringes the GDPR. The competent authority is in particular the supervisory authority of the federal state in which the controller is based. A list of all German supervisory authorities is available at https://www.bfdi.bund.de/."
       },
       "changes": {
-        "heading": "14. Changes to this policy",
+        "heading": "15. Changes to this policy",
         "body": "We reserve the right to update this policy in response to material changes to the service (e.g. new features, provider changes). The current version is always available via the footer of this application; the date at the top reflects the most recent revision."
       }
     }

@@ -1,9 +1,9 @@
 "use client";
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { HeartPulse, Search, Shield, Sword, Trash2 } from "lucide-react";
+import { HeartPulse, Loader2, Search, Shield, Sword, Trash2 } from "lucide-react";
 import { useTranslations } from "next-intl";
-import { use, useEffect, useState } from "react";
+import { use, useEffect, useRef, useState } from "react";
 
 import { AnalysisCard } from "@/components/AnalysisCard";
 import { AuthGuard } from "@/components/AuthGuard";
@@ -49,6 +49,12 @@ function AnalyzeView({ locale }: { locale: Locale }) {
       apiFetch<PaginatedReports>(
         `/api/v1/reports?page=${reportsPage}&page_size=${REPORTS_PAGE_SIZE}`,
       ),
+    // Keep refreshing the list while at least one report is still being
+    // imported, so the inline pulse-dot disappears the moment it lands.
+    refetchInterval: (q) =>
+      q.state.data?.items.some((r) => r.import_status === "importing")
+        ? 2500
+        : false,
   });
 
   const deleteReportMut = useMutation({
@@ -76,6 +82,15 @@ function AnalyzeView({ locale }: { locale: Locale }) {
       if (debouncedQuery) params.set("q", debouncedQuery);
       return apiFetch<PaginatedAnalyses>(`/api/v1/analyses?${params.toString()}`);
     },
+    // Keep refreshing while at least one item is still being worked on by
+    // the worker, so a queued/running entry flips to its final headline +
+    // score on its own.
+    refetchInterval: (q) =>
+      q.state.data?.items.some(
+        (a) => a.status === "pending" || a.status === "running",
+      )
+        ? 2500
+        : false,
   });
 
   const deleteAnalysisMut = useMutation({
@@ -92,6 +107,10 @@ function AnalyzeView({ locale }: { locale: Locale }) {
     queryKey: ["analysis", historicalAnalysisId],
     queryFn: () => apiFetch<Analysis>(`/api/v1/analyses/${historicalAnalysisId}`),
     enabled: !!historicalAnalysisId,
+    refetchInterval: (q) => {
+      const s = q.state.data?.status;
+      return s === "pending" || s === "running" ? 2000 : false;
+    },
   });
 
   // Debounce search → only refetch ~300ms after user stops typing.
@@ -112,7 +131,26 @@ function AnalyzeView({ locale }: { locale: Locale }) {
     queryKey: ["report", activeReportId],
     queryFn: () => apiFetch<Report>(`/api/v1/reports/${activeReportId}`),
     enabled: !!activeReportId,
+    // Poll every 2 s while the worker is still importing the report.
+    // Stops automatically once import_status flips to ``ready`` / ``failed``.
+    refetchInterval: (q) =>
+      q.state.data?.import_status === "importing" ? 2000 : false,
   });
+
+  // Scroll the report section into view so the user immediately sees the
+  // import-progress card / fights table without scrolling past the recent-
+  // reports list. The anchor sits just above the three status cards. We
+  // call it from two places: the useEffect below (handles reports opened
+  // via the recent-reports list) and the import mutation success (handles
+  // re-imports of the same WCL code where activeReportId doesn't change).
+  const reportAnchorRef = useRef<HTMLDivElement>(null);
+  function scrollToReportSection() {
+    // Small delay so the conditional Cards (importing/failed/ready) have a
+    // chance to mount before the browser computes the scroll target.
+    window.setTimeout(() => {
+      reportAnchorRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
+    }, 80);
+  }
 
   const importMut = useMutation({
     mutationFn: (raw: string) =>
@@ -124,9 +162,20 @@ function AnalyzeView({ locale }: { locale: Locale }) {
       setErr(null);
       setActiveReportId(report.id);
       qc.invalidateQueries({ queryKey: ["my-reports"] });
+      scrollToReportSection();
     },
     onError: (e) => setErr(e instanceof ApiClientError ? e.message : t("errors.generic")),
   });
+
+  useEffect(() => {
+    if (activeReportId) scrollToReportSection();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeReportId]);
+
+  // Disable the import button as long as either the HTTP request is in
+  // flight OR the worker is still chewing on the active report.
+  const importInFlight =
+    importMut.isPending || reportQ.data?.import_status === "importing";
 
   return (
     <div className="container-page space-y-6">
@@ -150,8 +199,17 @@ function AnalyzeView({ locale }: { locale: Locale }) {
             onChange={(e) => setInput(e.target.value)}
             className="md:flex-1"
           />
-          <Button type="submit" disabled={importMut.isPending}>
-            {importMut.isPending ? t("common.loading") : t("analyze.import")}
+          <Button
+            type="submit"
+            disabled={importInFlight}
+            className="inline-flex items-center gap-2"
+          >
+            {importInFlight && (
+              <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" />
+            )}
+            {importInFlight
+              ? t("analyze.importRunning")
+              : t("analyze.import")}
           </Button>
         </form>
         <FieldError>{err}</FieldError>
@@ -197,11 +255,19 @@ function AnalyzeView({ locale }: { locale: Locale }) {
                   <div className="min-w-0 flex-1">
                     <p className="text-sm text-zinc-100">
                       {r.title || r.zone_name || r.wcl_code}
+                      {r.import_status === "importing" && (
+                        <span className="ml-2 inline-block h-2 w-2 animate-pulse rounded-full bg-accent" />
+                      )}
+                      {r.import_status === "failed" && (
+                        <span className="ml-2 text-xs font-medium text-red-400">
+                          {t("analyze.importFailed")}
+                        </span>
+                      )}
                     </p>
                     <p className="text-xs text-zinc-500">
                       {r.zone_name}
-                      {r.zone_name && " · "}
-                      {formatDateTime(r.start_time, locale)}
+                      {r.zone_name && r.start_time && " · "}
+                      {r.start_time ? formatDateTime(r.start_time, locale) : ""}
                     </p>
                   </div>
                   <div className="flex shrink-0 items-center gap-2">
@@ -266,7 +332,33 @@ function AnalyzeView({ locale }: { locale: Locale }) {
         </Card>
       )}
 
-      {reportQ.data && (
+      {/* scroll-anchor — ``activeReportId`` change or import-trigger calls
+          scrollToReportSection() which targets this div. ``scroll-mt-24``
+          leaves ~6rem of breathing room under the sticky header. */}
+      <div ref={reportAnchorRef} className="scroll-mt-24" />
+
+      {reportQ.data?.import_status === "importing" && (
+        <Card>
+          <div className="flex items-center gap-3">
+            <Loader2 className="h-5 w-5 shrink-0 animate-spin text-accent" aria-hidden="true" />
+            <div>
+              <p className="font-semibold">{t("analyze.importRunning")}</p>
+              <p className="text-xs text-zinc-500">{t("analyze.importRunningHint")}</p>
+            </div>
+          </div>
+        </Card>
+      )}
+      {reportQ.data?.import_status === "failed" && (
+        <Card className="border-red-500/30">
+          <p className="font-semibold text-red-300">{t("analyze.importFailed")}</p>
+          {reportQ.data.import_error && (
+            <pre className="mt-2 whitespace-pre-wrap text-xs text-zinc-400">
+              {reportQ.data.import_error}
+            </pre>
+          )}
+        </Card>
+      )}
+      {reportQ.data?.import_status === "ready" && (
         <ReportView
           report={reportQ.data}
           classes={classesQ.data ?? []}
@@ -389,6 +481,7 @@ function PlayersTable({
       setAnalysisId(a.id);
       setAnalyzeError(null);
       qc.invalidateQueries({ queryKey: ["my-analyses"] });
+      scrollToAnalysisSection();
     },
     onError: (e) => {
       setAnalysisId(null);
@@ -406,7 +499,41 @@ function PlayersTable({
     queryKey: ["analysis", analysisId],
     queryFn: () => apiFetch<Analysis>(`/api/v1/analyses/${analysisId}`),
     enabled: !!analysisId,
+    // Poll while the worker is still working on the analysis. Once a terminal
+    // status (succeeded / failed) lands the interval returns false and the
+    // query becomes static.
+    refetchInterval: (q) => {
+      const s = q.state.data?.status;
+      return s === "pending" || s === "running" ? 2000 : false;
+    },
   });
+
+  // The moment the active analysis flips to a terminal state, refresh the
+  // "Recent Analyses" panel so it shows the final headline / score
+  // immediately instead of waiting for the panel's own poll interval.
+  useEffect(() => {
+    const s = analysisQ.data?.status;
+    if (s === "succeeded" || s === "failed") {
+      qc.invalidateQueries({ queryKey: ["my-analyses"] });
+    }
+  }, [analysisQ.data?.status, qc]);
+
+  // True from the moment the user clicks "Analyze" until the worker reports
+  // a terminal status. Disables every analyze-button on the table so the
+  // worker doesn't get spammed with parallel requests.
+  const analysisInFlight =
+    analyzeMut.isPending ||
+    analysisQ.data?.status === "pending" ||
+    analysisQ.data?.status === "running";
+
+  // Auto-scroll to the analysis section the moment the user clicks
+  // "Analyze". Same UX trick as the import button on the parent page.
+  const analysisAnchorRef = useRef<HTMLDivElement>(null);
+  function scrollToAnalysisSection() {
+    window.setTimeout(() => {
+      analysisAnchorRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
+    }, 80);
+  }
 
   return (
     <div className="space-y-4">
@@ -466,10 +593,14 @@ function PlayersTable({
                         setAnalyzeError(null);
                         analyzeMut.mutate(p);
                       }}
-                      disabled={analyzeMut.isPending}
+                      disabled={analysisInFlight}
                       className="inline-flex items-center gap-1.5"
                     >
-                      <Search className="h-3.5 w-3.5" aria-hidden="true" />
+                      {analysisInFlight && activePlayerId === p.id ? (
+                        <Loader2 className="h-3.5 w-3.5 animate-spin" aria-hidden="true" />
+                      ) : (
+                        <Search className="h-3.5 w-3.5" aria-hidden="true" />
+                      )}
                       {t("analyze.analyseThis")}
                     </Button>
                   </td>
@@ -525,10 +656,14 @@ function PlayersTable({
                       setAnalyzeError(null);
                       analyzeMut.mutate(p);
                     }}
-                    disabled={analyzeMut.isPending}
+                    disabled={analysisInFlight}
                     className="inline-flex items-center gap-1.5"
                   >
-                    <Search className="h-3.5 w-3.5" aria-hidden="true" />
+                    {analysisInFlight && activePlayerId === p.id ? (
+                      <Loader2 className="h-3.5 w-3.5 animate-spin" aria-hidden="true" />
+                    ) : (
+                      <Search className="h-3.5 w-3.5" aria-hidden="true" />
+                    )}
                     {t("analyze.analyseThis")}
                   </Button>
                 </div>
@@ -542,9 +677,17 @@ function PlayersTable({
         {t("topLogs.duration")}: {formatDuration(fight.duration_ms)}
       </p>
 
+      {/* scroll-anchor — clicking "Analyze" smooth-scrolls here so the
+          user immediately sees the running-state card and, later, the
+          AnalysisCard without scrolling past the player table. */}
+      <div ref={analysisAnchorRef} className="scroll-mt-24" />
+
       {analyzeMut.isPending && (
         <Card>
-          <p className="text-zinc-300">{t("analyze.analysisRunning")}</p>
+          <div className="flex items-center gap-3">
+            <Loader2 className="h-5 w-5 shrink-0 animate-spin text-accent" aria-hidden="true" />
+            <p className="text-sm text-zinc-300">{t("analyze.analysisRunning")}</p>
+          </div>
         </Card>
       )}
       {analyzeError && !analyzeMut.isPending && (
