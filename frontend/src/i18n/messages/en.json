@@ -169,5 +169,90 @@
     "forbidden": "You don't have permission to do that.",
     "notFound": "Not found.",
     "wclMissingCredentials": "Warcraft Logs credentials are not configured on the server. Ask an admin."
+  },
+  "legal": {
+    "imprintLink": "Imprint",
+    "privacyLink": "Privacy",
+
+    "imprintTitle": "Imprint",
+    "imprintProviderHeading": "Service provider (in the sense of § 5 DDG)",
+    "imprintContactHeading": "Contact",
+    "imprintResponsibleHeading": "Responsible for content under § 18 (2) MStV",
+    "imprintFields": {
+      "name": "Full name — set via .env",
+      "street": "Street and number",
+      "postalCity": "Postal code, City",
+      "country": "Country",
+      "email": "contact@your-domain",
+      "emailLabel": "Email",
+      "phoneLabel": "Phone"
+    },
+    "imprintDisclaimerHeading": "Disclaimer",
+    "imprintDisclaimerBody": "The contents of this service have been prepared with the greatest possible care. We do not, however, give any warranty as to the accuracy, completeness or up-to-dateness of the information or of the AI-generated reports. This is a non-commercial fan project; nothing on this site replaces professional advice. The game data processed in the reports is sourced from warcraftlogs.com; the respective operator and uploader is solely responsible for that content.",
+    "imprintBlizzardHeading": "Trademark notice",
+    "imprintBlizzardBody": "World of Warcraft® and all related terms, logos and character likenesses are registered trademarks of Blizzard Entertainment, Inc. This service is operated independently and is not affiliated with, endorsed by or sponsored by Blizzard Entertainment, Inc. or any of its subsidiaries.",
+
+    "privacyTitle": "Privacy Policy",
+    "privacyLastUpdated": "Last updated: May 2026",
+    "privacyIntro": "This privacy policy explains, in line with Articles 13 and 14 of the EU General Data Protection Regulation (GDPR), how we process personal data when you use this service. We process data only for the purposes described below and only on the legal bases stated.",
+
+    "privacySections": {
+      "controller": {
+        "heading": "1. Controller",
+        "body": "The controller within the meaning of Article 4 (7) GDPR is the natural person identified in the imprint. Use the email address listed there for any data-protection enquiries."
+      },
+      "scope": {
+        "heading": "2. Scope",
+        "body": "This policy applies to processing of personal data within this service (the \"WoW AI Log Analyzer\" web application). It does not apply to external services we link to; those have their own privacy policies."
+      },
+      "dataCollected": {
+        "heading": "3. What we process",
+        "body": "We process only the data necessary to operate the service:\n\n• Account data: your email address, your chosen display name, a one-way cryptographic hash of your password (bcrypt — your plaintext password never leaves your browser unencrypted and is never stored), preferred locale, account status.\n\n• Authentication tokens: session and refresh tokens (JWT) stored in your browser to keep you signed in.\n\n• Warcraft Logs connection data (optional): if you connect your WCL account, we store the OAuth access and refresh tokens encrypted with symmetric AES (Fernet), as well as your WCL user ID and display name.\n\n• Report and analysis data: imported Warcraft Logs reports (boss fights, player statistics, casts, buff/debuff uptimes, damage taken, gear) and the AI analyses derived from them. This data describes game characters and is not directly identifying personal data.\n\n• Server logs: when you access the service, the server briefly records technical data (IP address, timestamp, requested resource, user-agent) as is technically necessary for any web application."
+      },
+      "purposes": {
+        "heading": "4. Purposes",
+        "body": "• Operating the application (account, login, locale).\n• Importing and storing your WCL reports for local analysis.\n• Generating the AI coaching analyses per fight and per player.\n• Comparing your performance against cached public top logs for the same spec/encounter.\n• Protecting the service from abuse (e.g. rate limiting via server logs)."
+      },
+      "legalBasis": {
+        "heading": "5. Legal basis",
+        "body": "Processing is based on the following GDPR provisions:\n• Art. 6 (1) (b) GDPR (performance of a contract) — for account and report data you provide to use the service.\n• Art. 6 (1) (a) GDPR (consent) — for the optional WCL connection and for transmission to an external AI provider, where you actively choose that mode. You can withdraw consent at any time, with effect for the future, by disconnecting or switching back to local mode.\n• Art. 6 (1) (f) GDPR (legitimate interest) — for short-term processing of server logs to operate the service securely."
+      },
+      "thirdParties": {
+        "heading": "6. Recipients and transfers",
+        "body": "We share data with third parties only in the narrowly limited cases below:\n\n• Warcraft Logs (warcraftlogs.com, operator: Carraway, USA) — when you import a report or connect your account, we query the WCL API. Your request data and, if applicable, OAuth token information is therefore transferred to the United States. Legal basis: contract performance / consent.\n\n• AI providers (only when actively configured) — see section 8.\n\n• Hosting infrastructure — the application runs on a server we operate ourselves within the EU/EEA (see imprint). No transfer to external cloud hosting providers takes place."
+      },
+      "wcl": {
+        "heading": "7. Data retrieval from Warcraft Logs",
+        "body": "When you import a report, the service queries the corresponding game events through the official WCL GraphQL API and stores the result in our database. If you connect your WCL account, you can additionally view private and unlisted reports. You can disconnect at any time from your profile; stored tokens are deleted immediately when you do so."
+      },
+      "ai": {
+        "heading": "8. AI analysis of your reports",
+        "body": "The actual coaching analysis is generated by a language model. Which provider runs it depends on the configuration of this instance:\n\n• Local (default) — the analysis runs on a locally-hosted model on the same server. No transfer to third parties takes place.\n\n• Anthropic (Claude) or an OpenAI-compatible cloud provider — when enabled, we send the analysis prompt to the chosen provider. We transmit only the game information needed for the analysis (boss, spec, casts, buff uptimes, damage/healing, top-log reference data) and your preferred locale. We do not transmit account data (email, password hash) or any other identifiers. Anthropic processes the data in the United States; an adequate level of protection is ensured via the EU Standard Contractual Clauses. Activating this mode requires your consent."
+      },
+      "userApiKeys": {
+        "heading": "9. Bringing your own AI endpoint (planned feature)",
+        "body": "A future version is planned to let you store your own API key for an external AI service (e.g. OpenAI, an Ollama endpoint, or any OpenAI-compatible provider) in your profile. In that case, analysis requests would be sent directly to the provider you choose; the API key would be stored encrypted in our database. Under data-protection law, you would be responsible in that mode for picking a provider that meets your requirements — we would only forward the requests and would not transmit any additional personal data. This feature is not currently active; once it ships we will update this policy accordingly."
+      },
+      "retention": {
+        "heading": "10. Retention",
+        "body": "• Account data: as long as your account is active. When the account is deleted, all associated data (reports, analyses, WCL tokens) is automatically removed via cascading deletes.\n• Imported reports and analyses: until you delete them yourself or remove your account.\n• Cached top logs: up to 90 days; they are automatically replaced by new refreshes.\n• Server logs: at most 14 days, for security and diagnostics."
+      },
+      "cookies": {
+        "heading": "11. Cookies, local storage",
+        "body": "We do not set tracking cookies or advertising cookies. Your browser's local storage holds only technically necessary data: your session tokens (JWT) and a cached copy of your profile so the sign-in experience stays smooth. You can clear this data at any time by signing out or wiping your browser storage."
+      },
+      "rights": {
+        "heading": "12. Your rights",
+        "body": "Under the GDPR you have, in particular, the following rights:\n• Right of access (Art. 15)\n• Right to rectification (Art. 16)\n• Right to erasure / \"right to be forgotten\" (Art. 17)\n• Right to restriction of processing (Art. 18)\n• Right to data portability (Art. 20)\n• Right to object to processing based on Art. 6 (1) (f) (Art. 21)\n• Right to withdraw consent given, with effect for the future (Art. 7 (3))\n\nYou can exercise these rights via the contact email address listed in the imprint. You can also delete your account directly from your profile."
+      },
+      "complaint": {
+        "heading": "13. Right to lodge a complaint",
+        "body": "You have the right to lodge a complaint with a data-protection supervisory authority if you believe that the processing of your data infringes the GDPR. The competent authority is in particular the supervisory authority of the federal state in which the controller is based. A list of all German supervisory authorities is available at https://www.bfdi.bund.de/."
+      },
+      "changes": {
+        "heading": "14. Changes to this policy",
+        "body": "We reserve the right to update this policy in response to material changes to the service (e.g. new features, provider changes). The current version is always available via the footer of this application; the date at the top reflects the most recent revision."
+      }
+    }
   }
 }

@@ -162,7 +162,8 @@ function TopLogsView({ locale, user }: { locale: Locale; user: UserOut }) {
               <span className="text-xs"><ClassBadge cls={cls} spec={spec} locale={locale} /></span>
             )}
           </div>
-          <table className="w-full text-sm">
+          {/* Desktop: classic table */}
+          <table className="hidden w-full text-sm md:table">
             <thead className="text-xs uppercase tracking-wide text-zinc-400">
               <tr>
                 <th className="px-3 py-2 text-left">{t("topLogs.rank")}</th>
@@ -201,6 +202,42 @@ function TopLogsView({ locale, user }: { locale: Locale; user: UserOut }) {
               ))}
             </tbody>
           </table>
+
+          {/* Mobile: stacked card layout */}
+          <ul className="divide-y divide-bg-3 md:hidden">
+            {rows.map((r) => (
+              <li key={r.id} className="space-y-1 px-4 py-3">
+                <div className="flex items-baseline justify-between gap-3">
+                  <div className="flex min-w-0 items-baseline gap-2">
+                    <span className="shrink-0 text-xs font-semibold text-zinc-400">
+                      #{r.rank}
+                    </span>
+                    <span className="truncate text-sm text-zinc-100">{r.character_name}</span>
+                  </div>
+                  <span className="shrink-0 text-sm font-semibold tabular-nums text-accent">
+                    {formatNumber(r.amount, locale)}
+                  </span>
+                </div>
+                <div className="flex flex-wrap items-center justify-between gap-x-3 gap-y-1 text-xs text-zinc-500">
+                  <span className="truncate">
+                    {r.server} · {r.region.toUpperCase()}
+                  </span>
+                  <span className="tabular-nums">
+                    {t("topLogs.ilvl")} {r.item_level ? r.item_level.toFixed(0) : "—"} ·{" "}
+                    {formatDuration(r.duration_ms)}
+                  </span>
+                  <a
+                    href={`https://www.warcraftlogs.com/reports/${r.wcl_report_code}#fight=${r.wcl_fight_id}`}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="text-accent"
+                  >
+                    {t("topLogs.openOnWcl")}
+                  </a>
+                </div>
+              </li>
+            ))}
+          </ul>
         </Card>
       ))}
     </div>

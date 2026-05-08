@@ -1,10 +1,12 @@
 "use client";
 
+import { KeyRound, Lock, Mail, User } from "lucide-react";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import { useTranslations } from "next-intl";
 import { Suspense, use, useEffect, useState } from "react";
 
+import { AuthShell } from "@/components/AuthShell";
 import { Button, Card, FieldError, Input, Label } from "@/components/ui";
 import { ApiClientError, apiFetch } from "@/lib/api";
 import { setTokens } from "@/lib/auth";
@@ -67,7 +69,7 @@ function RegisterPageInner({ params }: { params: Promise<{ locale: Locale }> }) 
   }
 
   return (
-    <div className="container-page mx-auto max-w-md">
+    <AuthShell>
       <Card>
         <h1 className="mb-4 font-display text-2xl font-semibold">{t("auth.registerTitle")}</h1>
         {allowOpenReg === false && (
@@ -83,6 +85,7 @@ function RegisterPageInner({ params }: { params: Promise<{ locale: Locale }> }) 
               required
               value={displayName}
               onChange={(e) => setDisplayName(e.target.value)}
+              leftIcon={<User className="h-4 w-4" aria-hidden="true" />}
             />
           </div>
           <div>
@@ -94,6 +97,7 @@ function RegisterPageInner({ params }: { params: Promise<{ locale: Locale }> }) 
               required
               value={email}
               onChange={(e) => setEmail(e.target.value)}
+              leftIcon={<Mail className="h-4 w-4" aria-hidden="true" />}
             />
           </div>
           <div>
@@ -106,6 +110,7 @@ function RegisterPageInner({ params }: { params: Promise<{ locale: Locale }> }) 
               minLength={8}
               value={password}
               onChange={(e) => setPassword(e.target.value)}
+              leftIcon={<Lock className="h-4 w-4" aria-hidden="true" />}
             />
           </div>
           <div>
@@ -115,6 +120,7 @@ function RegisterPageInner({ params }: { params: Promise<{ locale: Locale }> }) 
               value={inviteToken}
               onChange={(e) => setInviteToken(e.target.value)}
               placeholder="token..."
+              leftIcon={<KeyRound className="h-4 w-4" aria-hidden="true" />}
             />
           </div>
           <FieldError>{err}</FieldError>
@@ -126,6 +132,6 @@ function RegisterPageInner({ params }: { params: Promise<{ locale: Locale }> }) 
           {t("auth.haveAccount")} <Link href={`/${locale}/login`}>{t("nav.login")}</Link>
         </p>
       </Card>
-    </div>
+    </AuthShell>
   );
 }

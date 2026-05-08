@@ -169,5 +169,90 @@
     "forbidden": "Du hast keine Berechtigung dafür.",
     "notFound": "Nicht gefunden.",
     "wclMissingCredentials": "Warcraft-Logs-Zugangsdaten sind nicht hinterlegt. Bitte den Admin."
+  },
+  "legal": {
+    "imprintLink": "Impressum",
+    "privacyLink": "Datenschutz",
+
+    "imprintTitle": "Impressum",
+    "imprintProviderHeading": "Anbieter (Diensteanbieter im Sinne des § 5 DDG)",
+    "imprintContactHeading": "Kontakt",
+    "imprintResponsibleHeading": "Inhaltlich verantwortlich nach § 18 Abs. 2 MStV",
+    "imprintFields": {
+      "name": "Vollständiger Name — in .env setzen",
+      "street": "Straße und Hausnummer",
+      "postalCity": "PLZ Ort",
+      "country": "Land",
+      "email": "kontakt@deine-domain.de",
+      "emailLabel": "E-Mail",
+      "phoneLabel": "Telefon"
+    },
+    "imprintDisclaimerHeading": "Haftungsausschluss",
+    "imprintDisclaimerBody": "Die Inhalte dieses Angebots wurden mit größtmöglicher Sorgfalt erstellt. Für die Richtigkeit, Vollständigkeit und Aktualität der Inhalte sowie der von der KI erzeugten Auswertungen kann jedoch keine Gewähr übernommen werden. Es handelt sich um ein nicht-kommerzielles Fan-Projekt; eine professionelle Beratung wird hierdurch nicht ersetzt. Die in den Berichten verarbeiteten Spieldaten stammen von warcraftlogs.com; für deren Inhalte ist ausschließlich der jeweilige Betreiber bzw. Uploader verantwortlich.",
+    "imprintBlizzardHeading": "Hinweis zu Markenrechten",
+    "imprintBlizzardBody": "World of Warcraft® sowie zugehörige Begriffe, Logos und Charakterdarstellungen sind eingetragene Marken der Blizzard Entertainment, Inc. Dieses Angebot wird unabhängig betrieben und steht in keiner Verbindung zu Blizzard Entertainment, Inc. oder einem ihrer Tochterunternehmen.",
+
+    "privacyTitle": "Datenschutzerklärung",
+    "privacyLastUpdated": "Stand: Mai 2026",
+    "privacyIntro": "Diese Datenschutzerklärung informiert dich gemäß Art. 13 und 14 der Datenschutz-Grundverordnung (DSGVO) über die Verarbeitung personenbezogener Daten, die anfällt, wenn du diesen Dienst nutzt. Wir verarbeiten Daten ausschließlich zu den in dieser Erklärung beschriebenen Zwecken und auf Basis der genannten Rechtsgrundlagen.",
+
+    "privacySections": {
+      "controller": {
+        "heading": "1. Verantwortlicher",
+        "body": "Verantwortlicher im Sinne des Art. 4 Nr. 7 DSGVO ist die im Impressum genannte natürliche Person. Kontakt für datenschutzrechtliche Anfragen über die im Impressum angegebene E-Mail-Adresse."
+      },
+      "scope": {
+        "heading": "2. Geltungsbereich",
+        "body": "Diese Erklärung gilt für die Verarbeitung personenbezogener Daten im Rahmen dieses Dienstes (Webanwendung WoW AI Log Analyzer). Sie gilt nicht für externe Dienste, auf die wir verlinken; dort gelten die jeweiligen Datenschutzbestimmungen der Betreiber."
+      },
+      "dataCollected": {
+        "heading": "3. Welche Daten wir verarbeiten",
+        "body": "Wir verarbeiten ausschließlich die Daten, die für den Betrieb des Dienstes notwendig sind:\n\n• Konto-Daten: E-Mail-Adresse, gewählter Anzeigename, ein verschlüsselter Hash deines Passworts (bcrypt — das Klartext-Passwort verlässt deinen Browser nie unverschlüsselt und wird nirgendwo gespeichert), bevorzugte Sprache, Kontostatus.\n\n• Authentifizierungs-Token: Sitzungs-/Refresh-Token (JWT), die in deinem Browser gespeichert werden, um dich angemeldet zu halten.\n\n• Verbindungsdaten zu Warcraft Logs (optional): Wenn du dein WCL-Konto verbindest, speichern wir die OAuth-Zugangs- und Refresh-Token symmetrisch verschlüsselt (Fernet/AES) sowie deine WCL-Benutzer-ID und den dort hinterlegten Anzeigenamen.\n\n• Berichts- und Analyse-Daten: Importierte Warcraft-Logs-Berichte (Boss-Kämpfe, Spieler-Statistiken, Casts, Buffs, Debuffs, erlittener Schaden, Ausrüstung) sowie die daraus erzeugten KI-Analysen. Diese Daten beziehen sich auf Spielcharaktere, nicht direkt auf identifizierbare natürliche Personen.\n\n• Server-Logfiles: Beim Aufruf des Dienstes erfasst der Server kurzfristig technische Daten (IP-Adresse, Zeitstempel, aufgerufene Ressource, User-Agent), wie es für jede Webanwendung technisch erforderlich ist."
+      },
+      "purposes": {
+        "heading": "4. Zwecke der Verarbeitung",
+        "body": "• Bereitstellung der Anwendung (Konto, Login, Spracheinstellung).\n• Import und Speicherung deiner WCL-Berichte zur lokalen Auswertung.\n• Erzeugung der KI-Coaching-Analysen pro Kampf und Spieler.\n• Vergleich mit gecachten öffentlichen Top-Logs der jeweiligen Spec/Boss-Kombination.\n• Schutz vor Missbrauch (z.B. Rate Limiting auf Server-Logfiles)."
+      },
+      "legalBasis": {
+        "heading": "5. Rechtsgrundlage",
+        "body": "Die Verarbeitung erfolgt auf folgenden Rechtsgrundlagen der DSGVO:\n• Art. 6 Abs. 1 lit. b DSGVO (Vertragserfüllung) — für Konto- und Berichtsdaten, die du zur Nutzung des Dienstes bereitstellst.\n• Art. 6 Abs. 1 lit. a DSGVO (Einwilligung) — für die optionale WCL-Verbindung sowie die Übermittlung an einen externen KI-Anbieter, sofern du dich für diesen Modus entscheidest. Diese Einwilligung kannst du jederzeit für die Zukunft widerrufen, indem du die Verbindung trennst oder zurück auf den lokalen Modus wechselst.\n• Art. 6 Abs. 1 lit. f DSGVO (berechtigtes Interesse) — für die kurzfristige Verarbeitung von Server-Logfiles zum sicheren Betrieb des Dienstes."
+      },
+      "thirdParties": {
+        "heading": "6. Empfänger und Übermittlung an Dritte",
+        "body": "Eine Übermittlung an Dritte findet nur in den folgenden, eng begrenzten Fällen statt:\n\n• Warcraft Logs (warcraftlogs.com, Betreiber: Carraway, USA) — wenn du einen Bericht importierst oder dein Konto verbindest, fragen wir Daten von der WCL-API ab. Damit erfolgt eine Übermittlung deiner Anfrage- und ggf. Token-Informationen in die USA. Rechtsgrundlage: Vertragserfüllung bzw. Einwilligung.\n\n• KI-Anbieter (nur wenn aktiv konfiguriert) — siehe Abschnitt 8.\n\n• Hosting-Infrastruktur — die Anwendung wird auf einem von uns betriebenen Server in der EU/im EWR gehostet (siehe Impressum). Eine Übermittlung an externe Cloud-Hoster findet nicht statt."
+      },
+      "wcl": {
+        "heading": "7. Datenabruf bei Warcraft Logs",
+        "body": "Wenn du einen Bericht importierst, ruft der Dienst die zugehörigen Spielereignisse über die offizielle WCL-GraphQL-API ab und speichert das Ergebnis in unserer Datenbank. Verbindest du dein WCL-Konto, kannst du zusätzlich auch private und nicht gelistete Berichte einsehen. Die Verbindung kannst du in deinem Profil jederzeit trennen; gespeicherte Token werden dabei umgehend gelöscht."
+      },
+      "ai": {
+        "heading": "8. KI-Auswertung deiner Berichte",
+        "body": "Die eigentliche Coaching-Analyse erzeugt ein Sprachmodell. Welcher Anbieter dabei genutzt wird, hängt von der Konfiguration der Instanz ab:\n\n• Lokal (Standard) — die Analyse läuft auf einem lokal betriebenen Modell auf demselben Server. Es findet keine Übermittlung an Dritte statt.\n\n• Anthropic (Claude) oder ein OpenAI-kompatibler Cloud-Anbieter — wenn aktiviert, übermitteln wir den Analyse-Prompt an den jeweiligen Anbieter. Übertragen werden ausschließlich die zur Analyse benötigten Spielinformationen (Boss, Spec, Casts, Buff-Uptimes, Schaden/Heilung, Top-Log-Vergleichsdaten) sowie deine bevorzugte Sprache. Es werden keine Konto-Daten (E-Mail, Passwort-Hash) und keine sonstigen Identifikatoren übermittelt. Anthropic verarbeitet die Daten in den USA; ein Schutzniveau wird über Standardvertragsklauseln gewährleistet. Die Aktivierung dieses Modus' setzt deine Einwilligung voraus."
+      },
+      "userApiKeys": {
+        "heading": "9. Nutzung eigener KI-Schnittstellen (geplantes Feature)",
+        "body": "In einer zukünftigen Version ist vorgesehen, dass du im Profil einen eigenen API-Schlüssel für einen externen KI-Dienst (z.B. OpenAI, Ollama-Endpunkt, anderer OpenAI-kompatibler Anbieter) hinterlegen kannst. In diesem Fall werden die Analyse-Anfragen direkt an den von dir gewählten Anbieter gesendet; der API-Schlüssel wird verschlüsselt in unserer Datenbank gespeichert. Datenschutzrechtlich bist du in diesem Modus selbst dafür verantwortlich, einen Anbieter zu wählen, der deinen Anforderungen genügt — wir leiten lediglich die Anfragen weiter und übermitteln keine zusätzlichen personenbezogenen Daten. Diese Funktion ist derzeit nicht aktiv; sobald sie eingeführt wird, aktualisieren wir diese Erklärung entsprechend."
+      },
+      "retention": {
+        "heading": "10. Speicherdauer",
+        "body": "• Konto-Daten: solange dein Konto aktiv ist. Bei Konto-Löschung werden alle zugeordneten Daten (Berichte, Analysen, WCL-Token) automatisch über kaskadierende Löschung mitentfernt.\n• Importierte Berichte und Analysen: bis du sie selbst löschst oder dein Konto entfernst.\n• Gecachte Top-Logs: bis zu 90 Tage; sie werden automatisch durch neue Refreshes überschrieben.\n• Server-Logfiles: maximal 14 Tage zu Sicherheits- und Diagnosezwecken."
+      },
+      "cookies": {
+        "heading": "11. Cookies, Local Storage",
+        "body": "Wir setzen keine Tracking-Cookies und keine Werbe-Cookies. Im Local Storage deines Browsers werden lediglich technisch notwendige Daten abgelegt: deine Sitzungs-Token (JWT) sowie eine zwischengespeicherte Kopie deines Profils, damit das Anmelde-Erlebnis flüssig bleibt. Diese Daten kannst du jederzeit löschen, indem du dich abmeldest oder den Browser-Speicher leerst."
+      },
+      "rights": {
+        "heading": "12. Deine Rechte",
+        "body": "Dir stehen nach DSGVO insbesondere folgende Rechte zu:\n• Recht auf Auskunft (Art. 15)\n• Recht auf Berichtigung (Art. 16)\n• Recht auf Löschung (Recht auf Vergessenwerden, Art. 17)\n• Recht auf Einschränkung der Verarbeitung (Art. 18)\n• Recht auf Datenübertragbarkeit (Art. 20)\n• Recht auf Widerspruch gegen eine auf Art. 6 Abs. 1 lit. f gestützte Verarbeitung (Art. 21)\n• Widerruf erteilter Einwilligungen mit Wirkung für die Zukunft (Art. 7 Abs. 3)\n\nDu kannst diese Rechte über die im Impressum angegebene Kontakt-E-Mail geltend machen. Eine vollständige Konto-Löschung ist zudem direkt im Profil möglich."
+      },
+      "complaint": {
+        "heading": "13. Beschwerderecht",
+        "body": "Du hast das Recht, dich bei einer Datenschutz-Aufsichtsbehörde zu beschweren, wenn du der Ansicht bist, dass die Verarbeitung deiner Daten gegen die DSGVO verstößt. Zuständig ist insbesondere die Aufsichtsbehörde des Bundeslandes, in dem der Verantwortliche seinen Sitz hat. Eine Liste aller deutschen Aufsichtsbehörden findest du unter https://www.bfdi.bund.de/."
+      },
+      "changes": {
+        "heading": "14. Änderungen dieser Erklärung",
+        "body": "Wir behalten uns vor, diese Datenschutzerklärung bei wesentlichen Änderungen am Dienst (z.B. neuen Features, Anbieterwechsel) anzupassen. Die jeweils aktuelle Fassung ist über den Footer dieser Anwendung jederzeit abrufbar; das Datum oben gibt den letzten Stand an."
+      }
+    }
   }
 }

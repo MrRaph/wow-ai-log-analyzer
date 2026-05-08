@@ -1,12 +1,14 @@
 "use client";
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { HeartPulse, Search, Shield, Sword, Trash2 } from "lucide-react";
 import { useTranslations } from "next-intl";
 import { use, useEffect, useState } from "react";
 
 import { AnalysisCard } from "@/components/AnalysisCard";
 import { AuthGuard } from "@/components/AuthGuard";
 import { ClassBadge } from "@/components/ClassBadge";
+import { EmptyState } from "@/components/EmptyState";
 import { Button, Card, FieldError, Input } from "@/components/ui";
 import { ApiClientError, apiFetch } from "@/lib/api";
 import { formatDateTime, formatDuration, formatNumber } from "@/lib/format";
@@ -190,7 +192,7 @@ function AnalyzeView({ locale }: { locale: Locale }) {
               return (
                 <li
                   key={r.id}
-                  className="flex flex-wrap items-center justify-between gap-3 py-2"
+                  className="flex flex-wrap items-center justify-between gap-3 rounded-md py-2 transition-colors hover:bg-bg-2/60"
                 >
                   <div className="min-w-0 flex-1">
                     <p className="text-sm text-zinc-100">
@@ -222,7 +224,7 @@ function AnalyzeView({ locale }: { locale: Locale }) {
                       aria-label={t("analyze.deleteReport")}
                       title={t("analyze.deleteReport")}
                     >
-                      {isDeleting ? "…" : "🗑"}
+                      {isDeleting ? "…" : <Trash2 className="h-4 w-4" aria-hidden="true" />}
                     </Button>
                   </div>
                 </li>
@@ -330,6 +332,16 @@ function ReportView({
   );
 }
 
+// Role-icon shown next to the class badge in the player table. Tank gets a
+// shield (purely cosmetic — analyses still treat tanks as DPS via their
+// damage metric). Healer gets a heart-pulse, DPS a sword.
+function RoleIcon({ role }: { role: string }) {
+  const cls = "h-3.5 w-3.5 shrink-0 text-zinc-400";
+  if (role === "healer") return <HeartPulse className={cls} aria-hidden="true" />;
+  if (role === "tank") return <Shield className={cls} aria-hidden="true" />;
+  return <Sword className={cls} aria-hidden="true" />;
+}
+
 function ParseChip({ percent }: { percent: number | null | undefined }) {
   if (percent === null || percent === undefined) {
     return <span className="text-zinc-500">—</span>;
@@ -399,7 +411,8 @@ function PlayersTable({
   return (
     <div className="space-y-4">
       <Card className="!p-0 overflow-hidden">
-        <table className="w-full text-sm">
+        {/* Desktop: classic table */}
+        <table className="hidden w-full text-sm md:table">
           <thead className="bg-bg-2 text-xs uppercase tracking-wide text-zinc-400">
             <tr>
               <th className="px-3 py-2 text-left">{t("analyze.players")}</th>
@@ -420,7 +433,10 @@ function PlayersTable({
                 <tr key={p.id} className={`border-t border-bg-3 ${isActive ? "bg-bg-2" : ""}`}>
                   <td className="px-3 py-2">
                     <div className="flex flex-col">
-                      <ClassBadge cls={cls} spec={spec} locale={locale} />
+                      <div className="flex items-center gap-1.5">
+                        <RoleIcon role={p.role} />
+                        <ClassBadge cls={cls} spec={spec} locale={locale} />
+                      </div>
                       <span className="text-xs text-zinc-400">
                         {p.name}-{p.server || "?"}
                       </span>
@@ -451,7 +467,9 @@ function PlayersTable({
                         analyzeMut.mutate(p);
                       }}
                       disabled={analyzeMut.isPending}
+                      className="inline-flex items-center gap-1.5"
                     >
+                      <Search className="h-3.5 w-3.5" aria-hidden="true" />
                       {t("analyze.analyseThis")}
                     </Button>
                   </td>
@@ -460,6 +478,64 @@ function PlayersTable({
             })}
           </tbody>
         </table>
+
+        {/* Mobile: stacked card layout per player */}
+        <ul className="divide-y divide-bg-3 md:hidden">
+          {fight.players.map((p) => {
+            const cls = classes.find((c) => c.slug === p.class_slug);
+            const spec = cls?.specs.find((s) => s.slug === p.spec_slug);
+            const isActive = p.id === activePlayerId;
+            const primary = p.role === "healer" ? p.hps : p.dps;
+            const primaryLabel = p.role === "healer" ? "HPS" : "DPS";
+            return (
+              <li
+                key={p.id}
+                className={`space-y-2 px-4 py-3 ${isActive ? "bg-bg-2" : ""}`}
+              >
+                <div className="flex items-center gap-2">
+                  <RoleIcon role={p.role} />
+                  <ClassBadge cls={cls} spec={spec} locale={locale} />
+                  <span className="ml-auto text-sm font-semibold tabular-nums text-accent">
+                    {primary ? formatNumber(primary, locale) : "—"}
+                    <span className="ml-1 text-xs font-normal text-zinc-400">
+                      {primaryLabel}
+                    </span>
+                  </span>
+                </div>
+                <div className="flex flex-wrap items-center justify-between gap-x-3 gap-y-1 text-xs text-zinc-500">
+                  <span className="truncate">
+                    {p.name}-{p.server || "?"}
+                  </span>
+                  <span className="tabular-nums">
+                    {t("topLogs.ilvl")} {p.item_level ? p.item_level.toFixed(0) : "—"}
+                  </span>
+                </div>
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <div className="flex items-center gap-1.5 text-xs text-zinc-400">
+                    <span>{t("analyze.parsePercent")}</span>
+                    <ParseChip percent={p.parse_percent} />
+                    <span className="ml-2">{t("analyze.ilvlPercent")}</span>
+                    <ParseChip percent={p.ilvl_percent} />
+                  </div>
+                  <Button
+                    size="sm"
+                    onClick={() => {
+                      setActivePlayerId(p.id);
+                      setAnalysisId(null);
+                      setAnalyzeError(null);
+                      analyzeMut.mutate(p);
+                    }}
+                    disabled={analyzeMut.isPending}
+                    className="inline-flex items-center gap-1.5"
+                  >
+                    <Search className="h-3.5 w-3.5" aria-hidden="true" />
+                    {t("analyze.analyseThis")}
+                  </Button>
+                </div>
+              </li>
+            );
+          })}
+        </ul>
       </Card>
 
       <p className="text-xs text-zinc-500">
@@ -541,9 +617,9 @@ function RecentAnalysesPanel({
 
       {loading && <p className="text-sm text-zinc-500">{t("common.loading")}</p>}
       {!loading && items.length === 0 && (
-        <p className="text-sm text-zinc-500">
-          {hasSearch ? t("analyze.noSearchResults") : t("analyze.recentAnalysesEmpty")}
-        </p>
+        <EmptyState
+          message={hasSearch ? t("analyze.noSearchResults") : t("analyze.recentAnalysesEmpty")}
+        />
       )}
       {!loading && items.length > 0 && (
         <ul className="divide-y divide-bg-3">
@@ -556,8 +632,8 @@ function RecentAnalysesPanel({
             return (
               <li
                 key={a.id}
-                className={`flex flex-wrap items-center justify-between gap-3 py-2 ${
-                  isActive ? "-mx-3 rounded bg-bg-2/40 px-3" : ""
+                className={`flex flex-wrap items-center justify-between gap-3 rounded-md py-2 transition-colors ${
+                  isActive ? "-mx-3 bg-bg-2/40 px-3" : "hover:bg-bg-2/60"
                 }`}
               >
                 <div className="min-w-0 flex-1">

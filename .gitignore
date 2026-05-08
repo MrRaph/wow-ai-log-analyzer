@@ -6,14 +6,22 @@ dist/
 wheels/
 *.egg-info
 .venv/
-.env
-.env.*.local
 .pytest_cache/
 .ruff_cache/
 .mypy_cache/
 htmlcov/
 .coverage
 coverage.xml
+
+# --- Env / secrets ---
+# Never commit anything that may carry real values. .env.example is the
+# tracked template; everything else with secrets stays local.
+.env
+.env.local
+.env.*.local
+secrets/
+*.pem
+*.key
 
 # --- Node / Next.js ---
 node_modules/
@@ -43,6 +51,17 @@ data/
 postgres-data/
 redis-data/
 uploads/
-.claude/projects/
+# Iteration scratch space for AI-generated brand/illustration assets — only
+# the curated outputs land in frontend/public/brand/ which is committed.
+frontend/public/generated/
 
+# --- Editor / scratch / backups ---
+*.bak
+*.tmp
+*.orig
+*.rej
+.DS_Store
+
+# --- Claude Code workspace ---
+.claude/projects/
 .claude/

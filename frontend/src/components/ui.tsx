@@ -1,18 +1,29 @@
 "use client";
 import clsx from "clsx";
-import type { ButtonHTMLAttributes, InputHTMLAttributes, LabelHTMLAttributes, ReactNode, SelectHTMLAttributes } from "react";
+import type {
+  ButtonHTMLAttributes,
+  InputHTMLAttributes,
+  LabelHTMLAttributes,
+  ReactNode,
+  SelectHTMLAttributes,
+} from "react";
 
 export function Card({
   children,
   className,
+  interactive = false,
 }: {
   children: ReactNode;
   className?: string;
+  /** Adds a subtle lift + warm glow on hover. Use on list rows / clickable cards. */
+  interactive?: boolean;
 }) {
   return (
     <div
       className={clsx(
         "rounded-xl border border-bg-3 bg-bg-1 p-5 shadow-[0_1px_0_rgba(255,255,255,0.04)_inset]",
+        interactive &&
+          "transition-[transform,border-color,box-shadow] duration-200 hover:-translate-y-0.5 hover:border-accent/40 hover:shadow-glow",
         className,
       )}
     >
@@ -52,15 +63,30 @@ export function Label({ className, ...rest }: LabelHTMLAttributes<HTMLLabelEleme
   );
 }
 
-export function Input({ className, ...rest }: InputHTMLAttributes<HTMLInputElement>) {
-  return (
+interface InputProps extends InputHTMLAttributes<HTMLInputElement> {
+  /** Optional icon node rendered absolutely-positioned on the left side. */
+  leftIcon?: ReactNode;
+}
+
+export function Input({ className, leftIcon, ...rest }: InputProps) {
+  const inputEl = (
     <input
       {...rest}
       className={clsx(
-        "w-full rounded-md border border-bg-3 bg-bg-2 px-3 py-2 text-sm text-zinc-100 placeholder:text-zinc-500 focus:border-accent focus:outline-none focus:ring-1 focus:ring-accent",
+        "w-full rounded-md border border-bg-3 bg-bg-2 py-2 text-sm text-zinc-100 placeholder:text-zinc-500 focus:border-accent focus:outline-none focus:ring-2 focus:ring-accent/50 focus:shadow-glow",
+        leftIcon ? "pl-9 pr-3" : "px-3",
         className,
       )}
     />
+  );
+  if (!leftIcon) return inputEl;
+  return (
+    <div className="relative">
+      <span className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-zinc-500">
+        {leftIcon}
+      </span>
+      {inputEl}
+    </div>
   );
 }
 
@@ -69,7 +95,7 @@ export function Select({ className, children, ...rest }: SelectHTMLAttributes<HT
     <select
       {...rest}
       className={clsx(
-        "w-full rounded-md border border-bg-3 bg-bg-2 px-3 py-2 text-sm text-zinc-100 focus:border-accent focus:outline-none focus:ring-1 focus:ring-accent",
+        "w-full rounded-md border border-bg-3 bg-bg-2 px-3 py-2 text-sm text-zinc-100 focus:border-accent focus:outline-none focus:ring-2 focus:ring-accent/50 focus:shadow-glow",
         className,
       )}
     >

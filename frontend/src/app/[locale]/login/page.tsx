@@ -1,10 +1,12 @@
 "use client";
 
+import { Lock, Mail } from "lucide-react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useTranslations } from "next-intl";
 import { use, useState } from "react";
 
+import { AuthShell } from "@/components/AuthShell";
 import { Button, Card, FieldError, Input, Label } from "@/components/ui";
 import { ApiClientError, apiFetch } from "@/lib/api";
 import { setTokens } from "@/lib/auth";
@@ -40,7 +42,7 @@ export default function LoginPage({ params }: { params: Promise<{ locale: Locale
   }
 
   return (
-    <div className="container-page mx-auto max-w-md">
+    <AuthShell>
       <Card>
         <h1 className="mb-4 font-display text-2xl font-semibold">{t("auth.loginTitle")}</h1>
         <form onSubmit={onSubmit} className="space-y-4">
@@ -53,6 +55,7 @@ export default function LoginPage({ params }: { params: Promise<{ locale: Locale
               required
               value={email}
               onChange={(e) => setEmail(e.target.value)}
+              leftIcon={<Mail className="h-4 w-4" aria-hidden="true" />}
             />
           </div>
           <div>
@@ -64,6 +67,7 @@ export default function LoginPage({ params }: { params: Promise<{ locale: Locale
               required
               value={password}
               onChange={(e) => setPassword(e.target.value)}
+              leftIcon={<Lock className="h-4 w-4" aria-hidden="true" />}
             />
           </div>
           <FieldError>{err}</FieldError>
@@ -76,6 +80,6 @@ export default function LoginPage({ params }: { params: Promise<{ locale: Locale
           <Link href={`/${locale}/register`}>{t("auth.noAccount")}</Link>
         </div>
       </Card>
-    </div>
+    </AuthShell>
   );
 }

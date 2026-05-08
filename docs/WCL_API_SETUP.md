@@ -23,8 +23,8 @@ Both flows use the *same* WCL API client. You only register one.
      https://<your-domain>/api/v1/auth/wcl/callback, http://localhost:8000/api/v1/auth/wcl/callback
      ```
      The URL match is exact — including scheme, host, port and path.
-   - **Public Client:** **leave UNCHECKED**. Both flows tauschen den Code
-     server-seitig gegen ein Token, das geht nur als confidential client.
+   - **Public Client:** **leave UNCHECKED**. Both flows exchange the auth
+     code for a token server-side, which only works for a confidential client.
 5. Save. You will see a **Client ID** and a **Client Secret**.
 6. Copy them into your `.env`:
    ```env
@@ -38,9 +38,11 @@ Both flows use the *same* WCL API client. You only register one.
 ## Rate limiting
 
 WCL applies a per-client request budget (rolling window). The analyzer keeps
-its own cache (top logs once per day, individual reports cached after first
-fetch) so the budget is rarely a concern. If you see 429s in the worker logs
-you can lower `TOP_LOGS_LIMIT` in `.env`.
+its own cache — top logs are refreshed weekly (`TOP_LOGS_CRON`, default
+Wednesday 08:00 UTC, ~1-3 h after the EU weekly reset) and individual reports
+are cached after the first fetch — so the budget is rarely a concern. If you
+see 429s in the worker logs you can lower `TOP_LOGS_LIMIT` or
+`TOP_LOGS_DETAIL_COUNT` in `.env`.
 
 ## Privacy
 
