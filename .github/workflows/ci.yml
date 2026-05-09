@@ -37,10 +37,24 @@ jobs:
   backend-tests:
     name: Backend (pytest)
     runs-on: ubuntu-latest
-    # Auth endpoints exercise the Redis-backed rate limiter through the
-    # arq pool — tests need a real Redis. SQLite-in-memory still covers
-    # the relational side via Base.metadata.create_all in conftest.
+    # Tests run against the same engine as production (PostgreSQL),
+    # so dialect-specific features (JSONB ops, native UUID, …) are
+    # actually exercised. Redis is needed for the rate-limiter that
+    # runs on auth endpoints.
     services:
+      postgres:
+        image: postgres:17-alpine
+        env:
+          POSTGRES_USER: test
+          POSTGRES_PASSWORD: test
+          POSTGRES_DB: test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U test -d test"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 10
       redis:
         image: redis:7-alpine
         ports:
@@ -51,9 +65,10 @@ jobs:
           --health-timeout 3s
           --health-retries 5
     env:
-      # The compose file points the backend at hostname ``redis``;
       # GitHub-hosted services are exposed on localhost via the port
-      # mapping above.
+      # mappings above. conftest reads TEST_DATABASE_URL first, then
+      # falls back to DATABASE_URL, then SQLite.
+      TEST_DATABASE_URL: postgresql+asyncpg://test:test@127.0.0.1:5432/test
       REDIS_HOST: 127.0.0.1
       REDIS_PORT: "6379"
     steps:
