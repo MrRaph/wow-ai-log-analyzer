@@ -28,6 +28,8 @@ function AcceptInvitePageInner({ params }: { params: Promise<{ locale: Locale }>
   const [password, setPassword] = useState("");
   const [displayName, setDisplayName] = useState("");
   const [captchaToken, setCaptchaToken] = useState<string | null>(null);
+  // Bump on submit-error → remounts TurnstileWidget for a fresh token.
+  const [captchaResetKey, setCaptchaResetKey] = useState(0);
   const [err, setErr] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const captchaRequired = useTurnstileEnabled();
@@ -58,6 +60,8 @@ function AcceptInvitePageInner({ params }: { params: Promise<{ locale: Locale }>
       router.push(`/${locale}/login`);
     } catch (e) {
       setErr(e instanceof ApiClientError ? e.message : t("errors.generic"));
+      setCaptchaToken(null);
+      setCaptchaResetKey((k) => k + 1);
     } finally {
       setLoading(false);
     }
@@ -90,7 +94,7 @@ function AcceptInvitePageInner({ params }: { params: Promise<{ locale: Locale }>
               leftIcon={<Lock className="h-4 w-4" aria-hidden="true" />}
             />
           </div>
-          <TurnstileWidget onToken={setCaptchaToken} />
+          <TurnstileWidget key={captchaResetKey} onToken={setCaptchaToken} />
           <FieldError>{err}</FieldError>
           <Button type="submit" disabled={loading || !token} className="w-full">
             {loading ? t("common.loading") : t("auth.acceptInviteSubmit")}

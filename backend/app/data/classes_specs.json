@@ -1,0 +1,70 @@
+{
+  "classes": [
+    {"slug": "death_knight", "name_en": "Death Knight", "name_de": "Todesritter", "color_hex": "#C41F3B"},
+    {"slug": "demon_hunter", "name_en": "Demon Hunter", "name_de": "Dämonenjäger", "color_hex": "#A330C9"},
+    {"slug": "druid", "name_en": "Druid", "name_de": "Druide", "color_hex": "#FF7D0A"},
+    {"slug": "evoker", "name_en": "Evoker", "name_de": "Rufer", "color_hex": "#33937F"},
+    {"slug": "hunter", "name_en": "Hunter", "name_de": "Jäger", "color_hex": "#ABD473"},
+    {"slug": "mage", "name_en": "Mage", "name_de": "Magier", "color_hex": "#69CCF0"},
+    {"slug": "monk", "name_en": "Monk", "name_de": "Mönch", "color_hex": "#00FF96"},
+    {"slug": "paladin", "name_en": "Paladin", "name_de": "Paladin", "color_hex": "#F58CBA"},
+    {"slug": "priest", "name_en": "Priest", "name_de": "Priester", "color_hex": "#FFFFFF"},
+    {"slug": "rogue", "name_en": "Rogue", "name_de": "Schurke", "color_hex": "#FFF569"},
+    {"slug": "shaman", "name_en": "Shaman", "name_de": "Schamane", "color_hex": "#0070DE"},
+    {"slug": "warlock", "name_en": "Warlock", "name_de": "Hexenmeister", "color_hex": "#9482C9"},
+    {"slug": "warrior", "name_en": "Warrior", "name_de": "Krieger", "color_hex": "#C79C6E"}
+  ],
+  "specs": [
+    {"slug": "death_knight_blood",   "class_slug": "death_knight", "name_en": "Blood",        "name_de": "Blut",         "role": "tank",   "wcl_spec_id": 250},
+    {"slug": "death_knight_frost",   "class_slug": "death_knight", "name_en": "Frost",        "name_de": "Frost",        "role": "dps",    "wcl_spec_id": 251},
+    {"slug": "death_knight_unholy",  "class_slug": "death_knight", "name_en": "Unholy",       "name_de": "Unheilig",     "role": "dps",    "wcl_spec_id": 252},
+
+    {"slug": "demon_hunter_havoc",   "class_slug": "demon_hunter", "name_en": "Havoc",        "name_de": "Verwüstung",   "role": "dps",    "wcl_spec_id": 577},
+    {"slug": "demon_hunter_vengeance","class_slug": "demon_hunter","name_en": "Vengeance",    "name_de": "Rachsucht",    "role": "tank",   "wcl_spec_id": 581},
+
+    {"slug": "druid_balance",        "class_slug": "druid",        "name_en": "Balance",      "name_de": "Gleichgewicht","role": "dps",    "wcl_spec_id": 102},
+    {"slug": "druid_feral",          "class_slug": "druid",        "name_en": "Feral",        "name_de": "Wildheit",     "role": "dps",    "wcl_spec_id": 103},
+    {"slug": "druid_guardian",       "class_slug": "druid",        "name_en": "Guardian",     "name_de": "Wächter",      "role": "tank",   "wcl_spec_id": 104},
+    {"slug": "druid_restoration",    "class_slug": "druid",        "name_en": "Restoration",  "name_de": "Wiederherstellung","role":"healer","wcl_spec_id": 105},
+
+    {"slug": "evoker_devastation",   "class_slug": "evoker",       "name_en": "Devastation",  "name_de": "Verheerung",   "role": "dps",    "wcl_spec_id": 1467},
+    {"slug": "evoker_preservation",  "class_slug": "evoker",       "name_en": "Preservation", "name_de": "Bewahrung",    "role": "healer", "wcl_spec_id": 1468},
+    {"slug": "evoker_augmentation",  "class_slug": "evoker",       "name_en": "Augmentation", "name_de": "Erweckung",    "role": "dps",    "wcl_spec_id": 1473},
+
+    {"slug": "hunter_beast_mastery", "class_slug": "hunter",       "name_en": "Beast Mastery","name_de": "Tierherrschaft","role": "dps",    "wcl_spec_id": 253},
+    {"slug": "hunter_marksmanship",  "class_slug": "hunter",       "name_en": "Marksmanship", "name_de": "Treffsicherheit","role": "dps",   "wcl_spec_id": 254},
+    {"slug": "hunter_survival",      "class_slug": "hunter",       "name_en": "Survival",     "name_de": "Überleben",    "role": "dps",    "wcl_spec_id": 255},
+
+    {"slug": "mage_arcane",          "class_slug": "mage",         "name_en": "Arcane",       "name_de": "Arkan",        "role": "dps",    "wcl_spec_id": 62},
+    {"slug": "mage_fire",            "class_slug": "mage",         "name_en": "Fire",         "name_de": "Feuer",        "role": "dps",    "wcl_spec_id": 63},
+    {"slug": "mage_frost",           "class_slug": "mage",         "name_en": "Frost",        "name_de": "Frost",        "role": "dps",    "wcl_spec_id": 64},
+
+    {"slug": "monk_brewmaster",      "class_slug": "monk",         "name_en": "Brewmaster",   "name_de": "Braumeister",  "role": "tank",   "wcl_spec_id": 268},
+    {"slug": "monk_mistweaver",      "class_slug": "monk",         "name_en": "Mistweaver",   "name_de": "Nebelwirker",  "role": "healer", "wcl_spec_id": 270},
+    {"slug": "monk_windwalker",      "class_slug": "monk",         "name_en": "Windwalker",   "name_de": "Windläufer",   "role": "dps",    "wcl_spec_id": 269},
+
+    {"slug": "paladin_holy",         "class_slug": "paladin",      "name_en": "Holy",         "name_de": "Heilig",       "role": "healer", "wcl_spec_id": 65},
+    {"slug": "paladin_protection",   "class_slug": "paladin",      "name_en": "Protection",   "name_de": "Schutz",       "role": "tank",   "wcl_spec_id": 66},
+    {"slug": "paladin_retribution",  "class_slug": "paladin",      "name_en": "Retribution",  "name_de": "Vergeltung",   "role": "dps",    "wcl_spec_id": 70},
+
+    {"slug": "priest_discipline",    "class_slug": "priest",       "name_en": "Discipline",   "name_de": "Disziplin",    "role": "healer", "wcl_spec_id": 256},
+    {"slug": "priest_holy",          "class_slug": "priest",       "name_en": "Holy",         "name_de": "Heilig",       "role": "healer", "wcl_spec_id": 257},
+    {"slug": "priest_shadow",        "class_slug": "priest",       "name_en": "Shadow",       "name_de": "Schatten",     "role": "dps",    "wcl_spec_id": 258},
+
+    {"slug": "rogue_assassination",  "class_slug": "rogue",        "name_en": "Assassination","name_de": "Meucheln",     "role": "dps",    "wcl_spec_id": 259},
+    {"slug": "rogue_outlaw",         "class_slug": "rogue",        "name_en": "Outlaw",       "name_de": "Gesetzlosigkeit","role": "dps",  "wcl_spec_id": 260},
+    {"slug": "rogue_subtlety",       "class_slug": "rogue",        "name_en": "Subtlety",     "name_de": "Täuschung",    "role": "dps",    "wcl_spec_id": 261},
+
+    {"slug": "shaman_elemental",     "class_slug": "shaman",       "name_en": "Elemental",    "name_de": "Elementar",    "role": "dps",    "wcl_spec_id": 262},
+    {"slug": "shaman_enhancement",   "class_slug": "shaman",       "name_en": "Enhancement",  "name_de": "Verstärkung",  "role": "dps",    "wcl_spec_id": 263},
+    {"slug": "shaman_restoration",   "class_slug": "shaman",       "name_en": "Restoration",  "name_de": "Wiederherstellung","role":"healer","wcl_spec_id": 264},
+
+    {"slug": "warlock_affliction",   "class_slug": "warlock",      "name_en": "Affliction",   "name_de": "Gebrechen",    "role": "dps",    "wcl_spec_id": 265},
+    {"slug": "warlock_demonology",   "class_slug": "warlock",      "name_en": "Demonology",   "name_de": "Dämonologie",  "role": "dps",    "wcl_spec_id": 266},
+    {"slug": "warlock_destruction",  "class_slug": "warlock",      "name_en": "Destruction",  "name_de": "Zerstörung",   "role": "dps",    "wcl_spec_id": 267},
+
+    {"slug": "warrior_arms",         "class_slug": "warrior",      "name_en": "Arms",         "name_de": "Waffen",       "role": "dps",    "wcl_spec_id": 71},
+    {"slug": "warrior_fury",         "class_slug": "warrior",      "name_en": "Fury",         "name_de": "Furor",        "role": "dps",    "wcl_spec_id": 72},
+    {"slug": "warrior_protection",   "class_slug": "warrior",      "name_en": "Protection",   "name_de": "Schutz",       "role": "tank",   "wcl_spec_id": 73}
+  ]
+}

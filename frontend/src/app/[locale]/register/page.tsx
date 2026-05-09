@@ -32,6 +32,8 @@ function RegisterPageInner({ params }: { params: Promise<{ locale: Locale }> }) 
   const [displayName, setDisplayName] = useState("");
   const [inviteToken, setInviteToken] = useState(search.get("token") ?? "");
   const [captchaToken, setCaptchaToken] = useState<string | null>(null);
+  // Bump on submit-error → remounts TurnstileWidget for a fresh token.
+  const [captchaResetKey, setCaptchaResetKey] = useState(0);
   const [err, setErr] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [allowOpenReg, setAllowOpenReg] = useState<boolean | null>(null);
@@ -71,6 +73,8 @@ function RegisterPageInner({ params }: { params: Promise<{ locale: Locale }> }) 
       router.push(`/${locale}/analyze`);
     } catch (e) {
       setErr(e instanceof ApiClientError ? e.message : t("errors.generic"));
+      setCaptchaToken(null);
+      setCaptchaResetKey((k) => k + 1);
     } finally {
       setLoading(false);
     }
@@ -131,7 +135,7 @@ function RegisterPageInner({ params }: { params: Promise<{ locale: Locale }> }) 
               leftIcon={<KeyRound className="h-4 w-4" aria-hidden="true" />}
             />
           </div>
-          <TurnstileWidget onToken={setCaptchaToken} />
+          <TurnstileWidget key={captchaResetKey} onToken={setCaptchaToken} />
           <FieldError>{err}</FieldError>
           <Button type="submit" disabled={loading} className="w-full">
             {loading ? t("common.loading") : t("auth.registerTitle")}

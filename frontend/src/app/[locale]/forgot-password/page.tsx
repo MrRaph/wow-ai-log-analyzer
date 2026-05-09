@@ -15,6 +15,8 @@ export default function ForgotPasswordPage({ params }: { params: Promise<{ local
   const t = useTranslations();
   const [email, setEmail] = useState("");
   const [captchaToken, setCaptchaToken] = useState<string | null>(null);
+  // Bump on submit-error → remounts TurnstileWidget for a fresh token.
+  const [captchaResetKey, setCaptchaResetKey] = useState(0);
   const [done, setDone] = useState(false);
   const [err, setErr] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
@@ -38,6 +40,8 @@ export default function ForgotPasswordPage({ params }: { params: Promise<{ local
       setDone(true);
     } catch (e) {
       setErr(e instanceof ApiClientError ? e.message : t("errors.generic"));
+      setCaptchaToken(null);
+      setCaptchaResetKey((k) => k + 1);
     } finally {
       setLoading(false);
     }
@@ -62,7 +66,7 @@ export default function ForgotPasswordPage({ params }: { params: Promise<{ local
                 leftIcon={<Mail className="h-4 w-4" aria-hidden="true" />}
               />
             </div>
-            <TurnstileWidget onToken={setCaptchaToken} />
+            <TurnstileWidget key={captchaResetKey} onToken={setCaptchaToken} />
             <FieldError>{err}</FieldError>
             <Button type="submit" disabled={loading} className="w-full">
               {loading ? t("common.loading") : t("common.submit")}
