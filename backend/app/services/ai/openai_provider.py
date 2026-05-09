@@ -126,6 +126,16 @@ class OpenAiCompatibleProvider:
             else {"max_tokens": max_t}
         )
 
+        # GPT-5 / o-series with reasoning engaged REJECT every
+        # non-default ``temperature`` value (``Only the default (1) value
+        # is supported``). For local llama.cpp and for OpenAI in
+        # non-reasoning mode (gpt-4o-family or gpt-5* without
+        # reasoning_effort), the parameter is honoured normally.
+        # → omit ``temperature`` whenever we just told OpenAI to reason.
+        omit_temperature = (
+            self._mode == "openai" and "reasoning_effort" in extra_body
+        )
+
         try:
             resp = await self._client.chat.completions.create(
                 model=chosen,
@@ -134,7 +144,7 @@ class OpenAiCompatibleProvider:
                     {"role": "user", "content": user_prompt},
                 ],
                 **token_kwargs,
-                temperature=temperature,
+                **({} if omit_temperature else {"temperature": temperature}),
                 extra_body=extra_body or None,
             )
         except Exception as exc:  # noqa: BLE001
