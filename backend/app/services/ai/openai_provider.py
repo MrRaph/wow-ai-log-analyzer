@@ -31,6 +31,7 @@ class OpenAiCompatibleProvider:
         api_key: str | None = None,
         base_url: str | None = None,
         model: str | None = None,
+        reasoning_effort: str | None = None,
     ) -> None:
         """Build a provider.
 
@@ -38,8 +39,14 @@ class OpenAiCompatibleProvider:
         has stored their own key in their profile), those win. Otherwise we
         fall back to the app-wide settings — that's the legacy admin-managed
         path used when an analysis is triggered without ``use_own_ai=true``.
+
+        ``reasoning_effort`` overrides ``settings.openai_reasoning_effort``
+        for the per-user BYOK path (the user's profile lets them pick their
+        own GPT-5 reasoning level). None / empty string falls through to
+        the app-wide setting.
         """
         self._mode = mode
+        self._reasoning_effort_override = (reasoning_effort or "").strip().lower() or None
         if api_key is not None:
             # BYOK / user-config path. Trust whatever the caller hands us.
             self._client = AsyncOpenAI(api_key=api_key, base_url=base_url or None)
@@ -80,12 +87,31 @@ class OpenAiCompatibleProvider:
         # provider. Set LOCAL_AI_ENABLE_THINKING=false in .env if you want
         # raw speed (~10s instead of ~30-60s) at a quality cost. The flag
         # is silently ignored by models that don't support it.
-        thinking_enabled = (
-            settings.local_ai_enable_thinking if self._mode == "local" else False
-        )
-        extra_body: dict[str, Any] = {
-            "chat_template_kwargs": {"enable_thinking": thinking_enabled},
-        }
+        # ``chat_template_kwargs.enable_thinking`` is a llama.cpp /
+        # Qwen-template-specific knob — it toggles the chain-of-thought
+        # block in the Jinja chat template. Real OpenAI's API rejects
+        # the parameter outright (HTTP 400 "Unknown parameter:
+        # 'chat_template_kwargs'"), so only send it for local mode.
+        extra_body: dict[str, Any] = {}
+        if self._mode == "local":
+            extra_body["chat_template_kwargs"] = {
+                "enable_thinking": settings.local_ai_enable_thinking,
+            }
+        # OpenAI's GPT-5 / o-series reasoning. Without this parameter
+        # the Chat Completions API silently runs the model in "no
+        # reasoning" mode (reasoning_tokens=0 in usage) — verified by
+        # smoke test against /v1/chat/completions. ``high`` engages
+        # full reasoning at the cost of ~5–10× output tokens.
+        # Valid values: minimal | low | medium | high. Empty / unset
+        # = OpenAI default (de facto minimal for Chat Completions).
+        # Per-user BYOK config overrides the app-wide setting.
+        if self._mode == "openai":
+            effort = (
+                self._reasoning_effort_override
+                or (settings.openai_reasoning_effort or "").strip().lower()
+            )
+            if effort in ("minimal", "low", "medium", "high"):
+                extra_body["reasoning_effort"] = effort
 
         # OpenAI deprecated ``max_tokens`` in favour of
         # ``max_completion_tokens`` for GPT-5+ and o1+ models — those
@@ -109,10 +135,27 @@ class OpenAiCompatibleProvider:
                 ],
                 **token_kwargs,
                 temperature=temperature,
-                extra_body=extra_body,
+                extra_body=extra_body or None,
             )
         except Exception as exc:  # noqa: BLE001
             raise UpstreamError(f"{self._mode} chat completion failed: {exc}") from exc
+
+        # Surface token usage for observability — the reasoning_tokens
+        # number tells us whether GPT-5/o-series actually engaged the
+        # reasoning trace or short-circuited (fast = often 0). For
+        # llama.cpp / Qwen the field is absent and stays at 0.
+        usage = getattr(resp, "usage", None)
+        if usage is not None:
+            details = getattr(usage, "completion_tokens_details", None)
+            reasoning_tokens = getattr(details, "reasoning_tokens", 0) if details else 0
+            logger.info(
+                "ai-call mode=%s model=%s prompt=%s completion=%s reasoning=%s",
+                self._mode,
+                chosen,
+                getattr(usage, "prompt_tokens", "?"),
+                getattr(usage, "completion_tokens", "?"),
+                reasoning_tokens,
+            )
 
         choice = resp.choices[0] if resp.choices else None
         message = choice.message if choice else None
