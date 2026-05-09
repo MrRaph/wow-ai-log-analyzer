@@ -37,6 +37,25 @@ jobs:
   backend-tests:
     name: Backend (pytest)
     runs-on: ubuntu-latest
+    # Auth endpoints exercise the Redis-backed rate limiter through the
+    # arq pool — tests need a real Redis. SQLite-in-memory still covers
+    # the relational side via Base.metadata.create_all in conftest.
+    services:
+      redis:
+        image: redis:7-alpine
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 5
+    env:
+      # The compose file points the backend at hostname ``redis``;
+      # GitHub-hosted services are exposed on localhost via the port
+      # mapping above.
+      REDIS_HOST: 127.0.0.1
+      REDIS_PORT: "6379"
     steps:
       - uses: actions/checkout@v4
 
@@ -55,8 +74,6 @@ jobs:
 
       - name: Run pytest
         working-directory: backend
-        # Tests use SQLite in-memory + ASGITransport, no DB/Redis
-        # service containers needed.
         run: uv run pytest -q
 
   frontend-checks:
