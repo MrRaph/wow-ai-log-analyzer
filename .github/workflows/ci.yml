@@ -33,6 +33,7 @@ env:
   # preserves case, so we lowercase it at job time via a setup step.
   BACKEND_IMAGE_NAME: wow-ai-log-analyzer-backend
   FRONTEND_IMAGE_NAME: wow-ai-log-analyzer-frontend
+  LOCAL_AI_IMAGE_NAME: wow-ai-log-analyzer-local-ai
 
 jobs:
   backend-tests:
@@ -261,9 +262,68 @@ jobs:
           cache-from: type=gha,scope=frontend
           cache-to: type=gha,mode=max,scope=frontend
 
+  build-local-ai:
+    name: Build + push local-ai → ghcr.io
+    needs: [backend-tests, frontend-checks, compose-validate]
+    if: >-
+      github.event_name == 'push' &&
+      (github.ref == 'refs/heads/main' ||
+        github.ref == 'refs/heads/master' ||
+        startsWith(github.ref, 'refs/tags/v'))
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Lowercase repository owner
+        id: lowercase
+        run: |
+          echo "owner=$(echo '${{ github.repository_owner }}' | tr '[:upper:]' '[:lower:]')" >> "$GITHUB_OUTPUT"
+
+      - name: Log in to ghcr.io
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Compute image tags
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.REGISTRY }}/${{ steps.lowercase.outputs.owner }}/${{ env.LOCAL_AI_IMAGE_NAME }}
+          flavor: |
+            latest=auto
+          tags: |
+            type=raw,value=latest,enable={{is_default_branch}}
+            type=sha,prefix=sha-,enable={{is_default_branch}}
+            type=semver,pattern={{version}}
+            type=semver,pattern={{major}}.{{minor}}
+            type=semver,pattern={{major}}
+
+      - name: Build & push local-ai
+        uses: docker/build-push-action@v5
+        with:
+          context: ./local-ai
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          # Image is mostly the upstream llama.cpp:server-cuda base
+          # (~2.3 GB compressed). ghcr deduplicates layers, so only
+          # the thin supervisor.py layer is uploaded after the first
+          # push. Cache scope keeps the upstream base layers warm
+          # across runs.
+          cache-from: type=gha,scope=local-ai
+          cache-to: type=gha,mode=max,scope=local-ai
+
   release:
     name: Create GitHub Release
-    needs: [build-backend, build-frontend]
+    needs: [build-backend, build-frontend, build-local-ai]
     # Only on tag pushes — main-branch pushes don't need a release entry.
     if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
     runs-on: ubuntu-latest

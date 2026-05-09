@@ -355,7 +355,8 @@ push to `main` / `master` (tests + publish backend image to ghcr.io).
 and a docker-compose syntax check.
 
 **On main pushes:** the same tests, then parallel build + push of
-both `backend` and `frontend` images to ghcr with:
+all three runtime images (`backend`, `frontend`, `local-ai`) to
+ghcr with:
 
 - `:latest` — newest main commit
 - `:sha-<short>` — immutable per-commit reference
@@ -365,17 +366,16 @@ get full semver tags (`:0.2.0`, `:0.2`, `:0`) — and a GitHub Release
 is auto-created with notes generated from commits since the previous
 tag. Pre-releases (`v0.2.0-rc1`) skip `:latest`.
 
-`local-ai` is intentionally **not** published (2.3 GB upstream base,
-thin code change — users build locally on first `docker compose
---profile local-ai up`). `worker` reuses the backend image.
+`worker` reuses the backend image; no separate build/push.
 
 ### Pulling the published images on your server
 
-Set both image overrides in `.env`:
+Set the image overrides in `.env`:
 
 ```env
 BACKEND_IMAGE=ghcr.io/your-name/wow-ai-log-analyzer-backend:latest
 FRONTEND_IMAGE=ghcr.io/your-name/wow-ai-log-analyzer-frontend:latest
+LOCAL_AI_IMAGE=ghcr.io/your-name/wow-ai-log-analyzer-local-ai:latest
 ```
 
 Pin a specific release for stability:
@@ -383,6 +383,7 @@ Pin a specific release for stability:
 ```env
 BACKEND_IMAGE=ghcr.io/your-name/wow-ai-log-analyzer-backend:0.2.0
 FRONTEND_IMAGE=ghcr.io/your-name/wow-ai-log-analyzer-frontend:0.2.0
+LOCAL_AI_IMAGE=ghcr.io/your-name/wow-ai-log-analyzer-local-ai:0.2.0
 ```
 
 Then deploy:
@@ -390,6 +391,8 @@ Then deploy:
 ```powershell
 git pull
 docker compose pull backend frontend
+# Add local-ai if you use it:
+docker compose --profile local-ai pull local-ai
 docker compose up -d
 ```
 

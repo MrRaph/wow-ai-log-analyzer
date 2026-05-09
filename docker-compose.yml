@@ -132,6 +132,10 @@ services:
   # survive container restarts.
   local-ai:
     profiles: ["local-ai"]
+    # Pull the published image from ghcr by default; override
+    # LOCAL_AI_IMAGE in .env to pin a specific release. Compose
+    # falls back to building locally if the image tag isn't found.
+    image: ${LOCAL_AI_IMAGE:-wow-ai-log-analyzer-local-ai:latest}
     build:
       context: ./local-ai
       dockerfile: Dockerfile
