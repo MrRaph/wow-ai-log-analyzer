@@ -12,6 +12,12 @@ name: CI
 on:
   push:
     branches: [main, master]
+    # Semver tags (``v0.2.0``, ``v0.3.0-rc1``, …) trigger a release run:
+    # builds the image with semver-derived tags AND creates a GitHub
+    # Release with auto-generated notes from commits since the previous
+    # tag. Pre-releases are detected by the ``-`` suffix and don't move
+    # the ``:latest`` image tag.
+    tags: ["v*"]
   pull_request:
     branches: [main, master]
 
@@ -103,9 +109,13 @@ jobs:
   build-and-push:
     name: Build + push backend → ghcr.io
     needs: [backend-tests, frontend-checks, compose-validate]
+    # Run on main-branch pushes AND on semver tag pushes. Skip PRs and
+    # arbitrary branches so we don't burn cache slots / churn ghcr.
     if: >-
       github.event_name == 'push' &&
-      (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master')
+      (github.ref == 'refs/heads/main' ||
+        github.ref == 'refs/heads/master' ||
+        startsWith(github.ref, 'refs/tags/v'))
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -131,13 +141,29 @@ jobs:
           password: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Compute image tags
+        # Tag matrix produced from this single action call:
+        #
+        #   main-branch push  → :latest, :sha-abc1234
+        #   tag v0.2.0        → :0.2.0, :0.2, :0, :latest    (stable)
+        #   tag v0.2.0-rc1    → :0.2.0-rc1                   (pre-release)
+        #
+        # ``flavor.latest=auto`` is the magic that decides whether a
+        # tag push moves :latest — it does for plain semver
+        # (``v0.2.0``) but not when there's a pre-release suffix
+        # (``-rc1``, ``-beta.2`` …). On non-tag pushes :latest is
+        # added explicitly via the raw rule below.
         id: meta
         uses: docker/metadata-action@v5
         with:
           images: ${{ env.REGISTRY }}/${{ steps.lowercase.outputs.owner }}/${{ env.BACKEND_IMAGE_NAME }}
+          flavor: |
+            latest=auto
           tags: |
-            type=raw,value=latest
-            type=sha,prefix=sha-
+            type=raw,value=latest,enable={{is_default_branch}}
+            type=sha,prefix=sha-,enable={{is_default_branch}}
+            type=semver,pattern={{version}}
+            type=semver,pattern={{major}}.{{minor}}
+            type=semver,pattern={{major}}
 
       - name: Build & push backend
         uses: docker/build-push-action@v5
@@ -151,3 +177,30 @@ jobs:
           # build incremental without an external storage backend.
           cache-from: type=gha
           cache-to: type=gha,mode=max
+
+  release:
+    name: Create GitHub Release
+    needs: [build-and-push]
+    # Only on tag pushes — main-branch pushes don't need a release entry.
+    if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # Full history so the release-notes generator can diff
+          # against the previous tag.
+          fetch-depth: 0
+
+      - name: Create release
+        uses: softprops/action-gh-release@v2
+        with:
+          # Auto-generate the release body from commits + merged PRs
+          # between the previous tag and this one (GitHub's standard
+          # changelog format with PRs/contributors grouped).
+          generate_release_notes: true
+          # Pre-release suffix (``-rc1``, ``-beta``, …) → mark as
+          # pre-release so users who pin :latest don't accidentally
+          # ship it. Stable semver tags become normal releases.
+          prerelease: ${{ contains(github.ref_name, '-') }}
