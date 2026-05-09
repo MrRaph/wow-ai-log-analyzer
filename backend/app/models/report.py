@@ -20,9 +20,10 @@ from sqlalchemy import (
     Text,
     UniqueConstraint,
 )
-from sqlalchemy.dialects.postgresql import JSONB, UUID
+from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
+from app.models._types import JSONType
 from app.models.base import Base, TimestampMixin
 
 
@@ -45,7 +46,7 @@ class Report(Base, TimestampMixin):
     end_time: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     region: Mapped[str] = mapped_column(String(8), default="", nullable=False)
     game_version: Mapped[str] = mapped_column(String(16), default="retail", nullable=False)
-    raw_meta: Mapped[dict] = mapped_column(JSONB, default=dict, nullable=False)
+    raw_meta: Mapped[dict] = mapped_column(JSONType, default=dict, nullable=False)
     # Async-import status the worker drives.
     #   "importing" → skeleton created, worker is fetching from WCL
     #   "ready"     → fully populated, frontend can render fights/players
@@ -79,7 +80,7 @@ class ReportFight(Base):
     boss_percentage: Mapped[float | None] = mapped_column(Float, nullable=True)
     duration_ms: Mapped[int] = mapped_column(BigInteger, nullable=False)
     start_time: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
-    extras: Mapped[dict] = mapped_column(JSONB, default=dict, nullable=False)
+    extras: Mapped[dict] = mapped_column(JSONType, default=dict, nullable=False)
 
     report: Mapped[Report] = relationship(back_populates="fights")
     players: Mapped[list["ReportPlayer"]] = relationship(
@@ -113,7 +114,7 @@ class ReportPlayer(Base):
     healing_done: Mapped[int] = mapped_column(BigInteger, default=0, nullable=False)
     deaths: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
     talents_loadout: Mapped[str | None] = mapped_column(String(2048), nullable=True)
-    extras: Mapped[dict] = mapped_column(JSONB, default=dict, nullable=False)
+    extras: Mapped[dict] = mapped_column(JSONType, default=dict, nullable=False)
 
     fight: Mapped[ReportFight] = relationship(back_populates="players")
     casts: Mapped[list["ReportPlayerCast"]] = relationship(
@@ -168,7 +169,7 @@ class ReportPlayerGear(Base):
     name: Mapped[str] = mapped_column(String(128), default="", nullable=False)
     icon: Mapped[str | None] = mapped_column(String(255), nullable=True)
     enchant_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
-    gem_ids: Mapped[list[int]] = mapped_column(JSONB, default=list, nullable=False)
-    bonus_ids: Mapped[list[int]] = mapped_column(JSONB, default=list, nullable=False)
+    gem_ids: Mapped[list[int]] = mapped_column(JSONType, default=list, nullable=False)
+    bonus_ids: Mapped[list[int]] = mapped_column(JSONType, default=list, nullable=False)
 
     player: Mapped[ReportPlayer] = relationship(back_populates="gear")

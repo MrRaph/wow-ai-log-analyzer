@@ -4,10 +4,11 @@ from __future__ import annotations
 import uuid
 from datetime import datetime
 
-from sqlalchemy import BigInteger, DateTime, Float, ForeignKey, Index, Integer, String
+from sqlalchemy import JSON, BigInteger, DateTime, Float, ForeignKey, Index, Integer, String
 from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
+from app.models._types import JSONType
 from app.models.base import Base, TimestampMixin
 
 
@@ -35,11 +36,13 @@ class TopLog(Base, TimestampMixin):
     wcl_report_code: Mapped[str] = mapped_column(String(32), nullable=False)
     wcl_fight_id: Mapped[int] = mapped_column(Integer, nullable=False)
     recorded_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
-    payload: Mapped[dict] = mapped_column(JSONB, default=dict, nullable=False)
+    payload: Mapped[dict] = mapped_column(JSONType, default=dict, nullable=False)
     # ``none_as_null=True`` so Python ``None`` maps to SQL NULL instead of the
     # JSONB ``null`` sentinel — keeps DB queries like ``WHERE detail_payload
     # IS NULL`` and ``count(detail_payload)`` honest about which rows
-    # actually have detail data attached.
+    # actually have detail data attached. The variant for SQLite (used in
+    # tests only) drops the option since plain JSON has no null-sentinel
+    # to worry about.
     detail_payload: Mapped[dict | None] = mapped_column(
-        JSONB(none_as_null=True), nullable=True
+        JSONB(none_as_null=True).with_variant(JSON(), "sqlite"), nullable=True
     )

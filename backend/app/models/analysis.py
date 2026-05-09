@@ -5,9 +5,10 @@ import enum
 import uuid
 
 from sqlalchemy import Boolean, Enum as PgEnum, ForeignKey, String, Text
-from sqlalchemy.dialects.postgresql import JSONB, UUID
+from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
+from app.models._types import JSONType
 from app.models.base import Base, TimestampMixin
 
 
@@ -56,7 +57,7 @@ class Analysis(Base, TimestampMixin):
     # ``hf.co/<author>/<repo>:<quant>`` easily hit 80+ chars).
     model: Mapped[str] = mapped_column(String(255), default="", nullable=False)
     summary: Mapped[str] = mapped_column(Text, default="", nullable=False)
-    structured: Mapped[dict] = mapped_column(JSONB, default=dict, nullable=False)
+    structured: Mapped[dict] = mapped_column(JSONType, default=dict, nullable=False)
     error: Mapped[str | None] = mapped_column(Text, nullable=True)
     prompt_tokens: Mapped[int] = mapped_column(default=0, nullable=False)
     completion_tokens: Mapped[int] = mapped_column(default=0, nullable=False)

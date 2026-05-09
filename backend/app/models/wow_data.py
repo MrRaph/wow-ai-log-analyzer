@@ -6,9 +6,10 @@ import uuid
 from datetime import datetime
 
 from sqlalchemy import DateTime, Index, Integer, String, Text
-from sqlalchemy.dialects.postgresql import JSONB, UUID
+from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
+from app.models._types import JSONType
 from app.models.base import Base, TimestampMixin
 
 
@@ -35,7 +36,7 @@ class WowLocalization(Base):
     game_id: Mapped[int] = mapped_column(Integer, primary_key=True)
     locale: Mapped[str] = mapped_column(String(8), primary_key=True)
     name: Mapped[str] = mapped_column(Text, nullable=False)
-    extras: Mapped[dict] = mapped_column(JSONB, default=dict, nullable=False)
+    extras: Mapped[dict] = mapped_column(JSONType, default=dict, nullable=False)
 
 
 class WowImportStatus(str, enum.Enum):
