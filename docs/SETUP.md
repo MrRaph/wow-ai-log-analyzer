@@ -354,35 +354,46 @@ push to `main` / `master` (tests + publish backend image to ghcr.io).
 **On PRs:** backend `pytest`, frontend `tsc --noEmit` + `next lint`,
 and a docker-compose syntax check.
 
-**On main:** the same tests, then build & push
-`ghcr.io/<owner>/wow-ai-log-analyzer-backend` with two tags:
+**On main pushes:** the same tests, then parallel build + push of
+both `backend` and `frontend` images to ghcr with:
 
 - `:latest` — newest main commit
 - `:sha-<short>` — immutable per-commit reference
 
-Frontend and local-ai are **not pushed** (frontend is now runtime-config,
-so it's tiny to rebuild on the host; local-ai's 2.3 GB upstream base
-isn't worth pushing). GitHub Pro packages quota is 2 GB private — the
-backend image alone fits comfortably.
+**On semver tags (`v0.2.0`):** in addition to `:latest`, the images
+get full semver tags (`:0.2.0`, `:0.2`, `:0`) — and a GitHub Release
+is auto-created with notes generated from commits since the previous
+tag. Pre-releases (`v0.2.0-rc1`) skip `:latest`.
 
-### Pulling the published image on your server
+`local-ai` is intentionally **not** published (2.3 GB upstream base,
+thin code change — users build locally on first `docker compose
+--profile local-ai up`). `worker` reuses the backend image.
 
-Set `BACKEND_IMAGE` in `.env`:
+### Pulling the published images on your server
+
+Set both image overrides in `.env`:
 
 ```env
 BACKEND_IMAGE=ghcr.io/your-name/wow-ai-log-analyzer-backend:latest
+FRONTEND_IMAGE=ghcr.io/your-name/wow-ai-log-analyzer-frontend:latest
 ```
 
-Then deploy with:
+Pin a specific release for stability:
+
+```env
+BACKEND_IMAGE=ghcr.io/your-name/wow-ai-log-analyzer-backend:0.2.0
+FRONTEND_IMAGE=ghcr.io/your-name/wow-ai-log-analyzer-frontend:0.2.0
+```
+
+Then deploy:
 
 ```powershell
 git pull
-docker compose pull backend         # only this image is on the registry
-docker compose up -d --build        # builds frontend locally; reuses backend
+docker compose pull backend frontend
+docker compose up -d
 ```
 
-`worker` shares the same image as `backend` (different `command:`), so
-you don't need a separate pull / build for it.
+`worker` shares `BACKEND_IMAGE`; no separate pull needed.
 
 ### Authenticating to ghcr.io
 

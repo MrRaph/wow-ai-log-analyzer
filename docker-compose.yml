@@ -95,11 +95,12 @@ services:
         condition: service_started
 
   frontend:
-    # No build args needed — the image is deployment-agnostic and reads
-    # all per-host config (imprint, default locale, Turnstile site key)
-    # at runtime via process.env (server components) or the public
-    # /api/v1/config endpoint (client). API base URL is relative, so
-    # the reverse proxy out front routes /api/* → backend, /* → here.
+    # The image is fully deployment-agnostic since the runtime-config
+    # refactor — imprint, default locale, Turnstile site key etc. are
+    # read at request time via process.env (server components) or the
+    # public /api/v1/config endpoint (client). Pull from ghcr or build
+    # locally; same artifact runs on any host.
+    image: ${FRONTEND_IMAGE:-wow-ai-log-analyzer-frontend:latest}
     build:
       context: ./frontend
       dockerfile: Dockerfile
@@ -107,10 +108,11 @@ services:
     env_file: .env
     environment:
       NODE_ENV: production
-      # Internal target for the Next.js /api/:path* rewrite. Used when
-      # there's no reverse proxy in front (e.g. hitting localhost:3000
-      # directly). With a proxy in front, /api/* is intercepted before
-      # reaching this container and this var is unused.
+      # Internal target for the Next.js /api/:path* route handler. Used
+      # when there's no reverse proxy in front (e.g. hitting
+      # localhost:3000 directly). With a proxy in front, /api/* is
+      # intercepted before reaching this container and this var is
+      # unused.
       BACKEND_URL: http://backend:8000
     depends_on:
       - backend

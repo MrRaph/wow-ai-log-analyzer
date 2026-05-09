@@ -30,8 +30,9 @@ concurrency:
 env:
   REGISTRY: ghcr.io
   # ghcr.io requires lowercase image names; ${{ github.repository_owner }}
-  # preserves case, so we lowercase it via the env at job time.
+  # preserves case, so we lowercase it at job time via a setup step.
   BACKEND_IMAGE_NAME: wow-ai-log-analyzer-backend
+  FRONTEND_IMAGE_NAME: wow-ai-log-analyzer-frontend
 
 jobs:
   backend-tests:
@@ -138,11 +139,13 @@ jobs:
           cp .env.example .env
           docker compose config --quiet
 
-  build-and-push:
+  # Two parallel image jobs (backend + frontend) — both deployment-
+  # agnostic since the runtime-config refactor (see docs/SETUP.md §8).
+  # local-ai is intentionally not pushed: 2.3 GB upstream base + thin
+  # code change, users build it locally.
+  build-backend:
     name: Build + push backend → ghcr.io
     needs: [backend-tests, frontend-checks, compose-validate]
-    # Run on main-branch pushes AND on semver tag pushes. Skip PRs and
-    # arbitrary branches so we don't burn cache slots / churn ghcr.
     if: >-
       github.event_name == 'push' &&
       (github.ref == 'refs/heads/main' ||
@@ -159,8 +162,6 @@ jobs:
         uses: docker/setup-buildx-action@v3
 
       - name: Lowercase repository owner
-        # ghcr.io insists on lowercase namespaces; tag construction
-        # below would 400 on ``GHCR/Mixed-Case`` users otherwise.
         id: lowercase
         run: |
           echo "owner=$(echo '${{ github.repository_owner }}' | tr '[:upper:]' '[:lower:]')" >> "$GITHUB_OUTPUT"
@@ -173,17 +174,14 @@ jobs:
           password: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Compute image tags
-        # Tag matrix produced from this single action call:
+        # Tag matrix:
         #
         #   main-branch push  → :latest, :sha-abc1234
         #   tag v0.2.0        → :0.2.0, :0.2, :0, :latest    (stable)
         #   tag v0.2.0-rc1    → :0.2.0-rc1                   (pre-release)
         #
-        # ``flavor.latest=auto`` is the magic that decides whether a
-        # tag push moves :latest — it does for plain semver
-        # (``v0.2.0``) but not when there's a pre-release suffix
-        # (``-rc1``, ``-beta.2`` …). On non-tag pushes :latest is
-        # added explicitly via the raw rule below.
+        # ``flavor.latest=auto`` decides whether a tag push moves
+        # :latest — only for plain semver, never for pre-releases.
         id: meta
         uses: docker/metadata-action@v5
         with:
@@ -204,15 +202,68 @@ jobs:
           push: true
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
-          # GitHub Actions cache: writes layers to the repo's Actions
-          # cache (10 GB total quota). Inline cache makes the next
-          # build incremental without an external storage backend.
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
+          # ``scope`` keeps backend/frontend cache namespaces separate
+          # so they don't evict each other from the 10 GB GHA cache.
+          cache-from: type=gha,scope=backend
+          cache-to: type=gha,mode=max,scope=backend
+
+  build-frontend:
+    name: Build + push frontend → ghcr.io
+    needs: [backend-tests, frontend-checks, compose-validate]
+    if: >-
+      github.event_name == 'push' &&
+      (github.ref == 'refs/heads/main' ||
+        github.ref == 'refs/heads/master' ||
+        startsWith(github.ref, 'refs/tags/v'))
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Lowercase repository owner
+        id: lowercase
+        run: |
+          echo "owner=$(echo '${{ github.repository_owner }}' | tr '[:upper:]' '[:lower:]')" >> "$GITHUB_OUTPUT"
+
+      - name: Log in to ghcr.io
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Compute image tags
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.REGISTRY }}/${{ steps.lowercase.outputs.owner }}/${{ env.FRONTEND_IMAGE_NAME }}
+          flavor: |
+            latest=auto
+          tags: |
+            type=raw,value=latest,enable={{is_default_branch}}
+            type=sha,prefix=sha-,enable={{is_default_branch}}
+            type=semver,pattern={{version}}
+            type=semver,pattern={{major}}.{{minor}}
+            type=semver,pattern={{major}}
+
+      - name: Build & push frontend
+        uses: docker/build-push-action@v5
+        with:
+          context: ./frontend
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha,scope=frontend
+          cache-to: type=gha,mode=max,scope=frontend
 
   release:
     name: Create GitHub Release
-    needs: [build-and-push]
+    needs: [build-backend, build-frontend]
     # Only on tag pushes — main-branch pushes don't need a release entry.
     if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
     runs-on: ubuntu-latest
