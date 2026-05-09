@@ -6,17 +6,112 @@ Run via ``arq app.workers.arq_app.WorkerSettings`` (Compose does this for the
 from __future__ import annotations
 
 import logging
+from datetime import UTC, datetime, timedelta
 
+from arq import func
 from arq.connections import RedisSettings
 from arq.cron import cron
+from sqlalchemy import update
 
 from app.config import settings
+from app.db import async_session_factory
+from app.models import (
+    Analysis,
+    AnalysisStatus,
+    Report,
+    TopLogsSeedJob,
+    WowDataImport,
+    WowImportStatus,
+)
 from app.workers.tasks.analysis import run_analysis_task
 from app.workers.tasks.report_import import import_report_task
+from app.workers.tasks.seed_encounter import seed_encounter_task
 from app.workers.tasks.top_logs import refresh_all_top_logs
 from app.workers.tasks.wow_data import refresh_wow_data
 
 logger = logging.getLogger(__name__)
+
+
+async def _cleanup_zombies(_ctx: dict) -> None:
+    """Mark stale in-progress rows as failed at worker boot.
+
+    A worker container restart kills the running coroutine mid-flight; the
+    DB row stays in ``in_progress`` / ``running`` indefinitely otherwise.
+    Called by arq's ``on_startup`` so the next boot cleans up its predecessor.
+
+    We use a 10-minute floor so jobs that are *legitimately* in flight when
+    a brand-new worker starts (e.g. blue/green deploy with overlap) aren't
+    falsely killed. In practice all our task types finish well under that.
+    """
+    cutoff = datetime.now(UTC) - timedelta(minutes=10)
+    async with async_session_factory() as session:
+        async with session.begin():
+            wow_n = (
+                await session.execute(
+                    update(WowDataImport)
+                    .where(
+                        WowDataImport.status == WowImportStatus.in_progress.value,
+                        WowDataImport.started_at < cutoff,
+                    )
+                    .values(
+                        status=WowImportStatus.failed.value,
+                        finished_at=datetime.now(UTC),
+                        phase="",
+                        notes="abandoned (worker restart killed the run)",
+                    )
+                )
+            ).rowcount
+            seed_n = (
+                await session.execute(
+                    update(TopLogsSeedJob)
+                    .where(
+                        TopLogsSeedJob.status.in_(("queued", "running")),
+                        TopLogsSeedJob.started_at < cutoff,
+                    )
+                    .values(
+                        status="failed",
+                        finished_at=datetime.now(UTC),
+                        current_spec_slug=None,
+                        error="abandoned (worker restart killed the run)",
+                    )
+                )
+            ).rowcount
+            ana_n = (
+                await session.execute(
+                    update(Analysis)
+                    .where(
+                        Analysis.status.in_(
+                            (AnalysisStatus.pending, AnalysisStatus.running)
+                        ),
+                        Analysis.created_at < cutoff,
+                    )
+                    .values(
+                        status=AnalysisStatus.failed,
+                        error="abandoned (worker restart killed the run)",
+                    )
+                )
+            ).rowcount
+            rep_n = (
+                await session.execute(
+                    update(Report)
+                    .where(
+                        Report.import_status == "importing",
+                        Report.created_at < cutoff,
+                    )
+                    .values(
+                        import_status="failed",
+                        import_error="abandoned (worker restart killed the run)",
+                    )
+                )
+            ).rowcount
+    if wow_n or seed_n or ana_n or rep_n:
+        logger.info(
+            "worker startup zombie cleanup: wow_data=%s seed_jobs=%s analyses=%s reports=%s",
+            wow_n,
+            seed_n,
+            ana_n,
+            rep_n,
+        )
 
 
 def _parse_field(field: str) -> int | set[int] | None:
@@ -67,6 +162,9 @@ class WorkerSettings:
         refresh_wow_data,
         import_report_task,
         run_analysis_task,
+        # 35 min — 39 specs × ~17 s WCL latency easily blows past the
+        # 10 min default for fresh-cache seeds.
+        func(seed_encounter_task, timeout=35 * 60),
     ]
     cron_jobs = [
         cron(refresh_all_top_logs, name="refresh_all_top_logs", **_cron_kwargs),
@@ -75,14 +173,17 @@ class WorkerSettings:
         # before the EU reset top-logs job) is plenty.
         cron(refresh_wow_data, name="refresh_wow_data", weekday=2, hour=3, minute=0),
     ]
+    on_startup = _cleanup_zombies
     keep_result = 86400
     # Number of jobs that may run in parallel inside this worker process.
     # Top-logs refresh, report import and analysis can all coexist; bump
     # this if you see jobs queueing up.
     max_jobs = 4
-    # Long enough that a slow Anthropic call or a large Mythic raid import
-    # never gets killed mid-flight. arq's default 300s was occasionally
-    # tight on local-AI runs with thinking enabled.
+    # Default per-job timeout. Long enough for a slow Anthropic call or a
+    # large Mythic raid import. Per-task overrides are wired via
+    # ``arq.func(..., timeout=...)`` in the ``functions`` list above for
+    # tasks that legitimately take longer (e.g. seed_encounter_task walks
+    # 39 specs and bumps to 35 min).
     job_timeout = 600
     # Don't retry analysis or import jobs by default — failures are stored
     # on the row itself and the user can re-trigger from the UI.

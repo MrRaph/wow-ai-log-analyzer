@@ -7,6 +7,7 @@ import { Suspense, use, useState } from "react";
 
 import { AuthGuard } from "@/components/AuthGuard";
 import { Button, Card, FieldError, Input, Label, Select } from "@/components/ui";
+import { UserAiConfigPanel } from "@/components/UserAiConfigPanel";
 import { WclConnectionPanel } from "@/components/WclConnectionPanel";
 import { ApiClientError, apiFetch } from "@/lib/api";
 import { setCachedUser, clearAuth } from "@/lib/auth";
@@ -124,6 +125,7 @@ function ProfileView({ user, locale }: { user: UserOut; locale: Locale }) {
       <Suspense fallback={null}>
         <WclConnectionPanel locale={locale} />
       </Suspense>
+      <UserAiConfigPanel />
       <Card className="border-red-500/30">
         <h2 className="mb-1 font-semibold text-red-300">
           {t("profile.deleteAccountHeading")}

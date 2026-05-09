@@ -20,9 +20,11 @@ import type {
   GameClass,
   PaginatedAnalyses,
   PaginatedReports,
+  PublicConfig,
   Report,
   ReportFight,
   ReportPlayer,
+  UserAiConfig,
 } from "@/types/api";
 
 export default function AnalyzePage({ params }: { params: Promise<{ locale: Locale }> }) {
@@ -466,8 +468,27 @@ function PlayersTable({
   const [analysisId, setAnalysisId] = useState<string | null>(null);
   const [analyzeError, setAnalyzeError] = useState<string | null>(null);
 
+  // Decide whether the App-AI / Own-AI buttons are enabled.
+  // Short staleTime so an admin who just toggled ``ai_provider=disabled``
+  // sees the buttons disable on every other tab within ~10 s without
+  // needing a hard refresh. Plus refetch-on-focus to cover Alt-Tab back.
+  const publicCfgQ = useQuery({
+    queryKey: ["public-config"],
+    queryFn: () => apiFetch<PublicConfig>("/api/v1/config", { anonymous: true }),
+    staleTime: 10 * 1000,
+    refetchOnWindowFocus: true,
+  });
+  const ownAiQ = useQuery({
+    queryKey: ["my-ai-config"],
+    queryFn: () => apiFetch<UserAiConfig | null>("/api/v1/users/me/ai-config"),
+    staleTime: 30 * 1000,
+    refetchOnWindowFocus: true,
+  });
+  const appAiEnabled = publicCfgQ.data?.ai_enabled ?? true;
+  const ownAiConfigured = !!ownAiQ.data;
+
   const analyzeMut = useMutation({
-    mutationFn: (player: ReportPlayer) =>
+    mutationFn: ({ player, useOwnAi }: { player: ReportPlayer; useOwnAi: boolean }) =>
       apiFetch<Analysis>("/api/v1/analyses", {
         method: "POST",
         locale,
@@ -475,6 +496,7 @@ function PlayersTable({
           report_id: reportId,
           fight_id: fight.id,
           player_id: player.id,
+          use_own_ai: useOwnAi,
         },
       }),
     onSuccess: (a) => {
@@ -535,6 +557,60 @@ function PlayersTable({
     }, 80);
   }
 
+  function triggerAnalysis(player: ReportPlayer, useOwnAi: boolean) {
+    setActivePlayerId(player.id);
+    setAnalysisId(null);
+    setAnalyzeError(null);
+    analyzeMut.mutate({ player, useOwnAi });
+  }
+
+  function AnalyzeButtons({ player }: { player: ReportPlayer }) {
+    const isMe = activePlayerId === player.id;
+    const appBtnDisabled = analysisInFlight || !appAiEnabled;
+    const ownBtnDisabled = analysisInFlight || !ownAiConfigured;
+    return (
+      <div className="flex flex-wrap items-center justify-end gap-1.5">
+        <Button
+          size="sm"
+          onClick={() => triggerAnalysis(player, false)}
+          disabled={appBtnDisabled}
+          className="inline-flex items-center gap-1.5"
+          title={
+            !appAiEnabled
+              ? t("analyze.appAiDisabledTooltip")
+              : t("analyze.appAiTooltip")
+          }
+        >
+          {analysisInFlight && isMe ? (
+            <Loader2 className="h-3.5 w-3.5 animate-spin" aria-hidden="true" />
+          ) : (
+            <Search className="h-3.5 w-3.5" aria-hidden="true" />
+          )}
+          {t("analyze.analyseAppAi")}
+        </Button>
+        <Button
+          size="sm"
+          variant="secondary"
+          onClick={() => triggerAnalysis(player, true)}
+          disabled={ownBtnDisabled}
+          className="inline-flex items-center gap-1.5"
+          title={
+            !ownAiConfigured
+              ? t("analyze.ownAiNotConfiguredTooltip")
+              : t("analyze.ownAiTooltip")
+          }
+        >
+          {analysisInFlight && isMe ? (
+            <Loader2 className="h-3.5 w-3.5 animate-spin" aria-hidden="true" />
+          ) : (
+            <Search className="h-3.5 w-3.5" aria-hidden="true" />
+          )}
+          {t("analyze.analyseOwnAi")}
+        </Button>
+      </div>
+    );
+  }
+
   return (
     <div className="space-y-4">
       <Card className="!p-0 overflow-hidden">
@@ -585,24 +661,7 @@ function PlayersTable({
                     <ParseChip percent={p.ilvl_percent} />
                   </td>
                   <td className="px-3 py-2 text-right">
-                    <Button
-                      size="sm"
-                      onClick={() => {
-                        setActivePlayerId(p.id);
-                        setAnalysisId(null);
-                        setAnalyzeError(null);
-                        analyzeMut.mutate(p);
-                      }}
-                      disabled={analysisInFlight}
-                      className="inline-flex items-center gap-1.5"
-                    >
-                      {analysisInFlight && activePlayerId === p.id ? (
-                        <Loader2 className="h-3.5 w-3.5 animate-spin" aria-hidden="true" />
-                      ) : (
-                        <Search className="h-3.5 w-3.5" aria-hidden="true" />
-                      )}
-                      {t("analyze.analyseThis")}
-                    </Button>
+                    <AnalyzeButtons player={p} />
                   </td>
                 </tr>
               );
@@ -648,24 +707,7 @@ function PlayersTable({
                     <span className="ml-2">{t("analyze.ilvlPercent")}</span>
                     <ParseChip percent={p.ilvl_percent} />
                   </div>
-                  <Button
-                    size="sm"
-                    onClick={() => {
-                      setActivePlayerId(p.id);
-                      setAnalysisId(null);
-                      setAnalyzeError(null);
-                      analyzeMut.mutate(p);
-                    }}
-                    disabled={analysisInFlight}
-                    className="inline-flex items-center gap-1.5"
-                  >
-                    {analysisInFlight && activePlayerId === p.id ? (
-                      <Loader2 className="h-3.5 w-3.5 animate-spin" aria-hidden="true" />
-                    ) : (
-                      <Search className="h-3.5 w-3.5" aria-hidden="true" />
-                    )}
-                    {t("analyze.analyseThis")}
-                  </Button>
+                  <AnalyzeButtons player={p} />
                 </div>
               </li>
             );

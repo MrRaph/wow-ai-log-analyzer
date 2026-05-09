@@ -59,7 +59,9 @@ class Settings(BaseSettings):
     # --- AI ---
     # "anthropic" → cloud Claude. "openai" → cloud OpenAI / Azure-OpenAI.
     # "local" → an OpenAI-compatible server you run yourself (vLLM/Ollama/...).
-    ai_provider: Literal["anthropic", "openai", "local"] = "anthropic"
+    # "disabled" → app-wide AI is off; users can still analyse with their
+    # own API keys via the BYOK flow on the profile page.
+    ai_provider: Literal["anthropic", "openai", "local", "disabled"] = "anthropic"
     anthropic_api_key: str = ""
     ai_model: str = "claude-sonnet-4-6"
     ai_max_tokens: int = 8000
@@ -70,14 +72,28 @@ class Settings(BaseSettings):
     # or any OpenAI-compatible cloud proxy.
     openai_base_url: str = ""
 
-    # --- AI: local model via vLLM / Ollama / LM Studio ---
-    # Used when ai_provider == "local". The container exposes vLLM at this URL.
-    local_ai_base_url: str = "http://local-ai:8000/v1"
-    # Model the local server is serving. Must match the --model arg passed
-    # to vLLM in docker-compose.yml.
-    local_ai_model: str = "HauhauCS/Qwen3.6-35B-A3B-Uncensored-HauhauCS-Aggressive"
-    # vLLM ignores the API key but the OpenAI SDK requires *something*.
+    # --- AI: local model via the bundled llama.cpp container ---
+    # Used when ai_provider == "local". The compose service ``local-ai``
+    # exposes the OpenAI-compatible inference endpoint here.
+    local_ai_base_url: str = "http://local-ai:8080/v1"
+    # The local-ai sidecar's management API (port 8081 inside the same
+    # container). Used to switch models, list cached GGUFs, and stop or
+    # start inference without going through the Docker socket.
+    local_ai_supervisor_url: str = "http://local-ai:8081"
+    # Initial defaults for the supervisor — only consulted on first boot
+    # of the local-ai container. After an admin saves config in the UI
+    # the supervisor's persisted state in /cache/supervisor-state.json
+    # takes precedence on subsequent boots.
+    local_ai_hf_repo: str = ""
+    local_ai_hf_file: str = ""
+    # Friendly model alias returned by /v1/models. Must match the OpenAI
+    # SDK ``model=`` parameter on the backend side.
+    local_ai_model: str = "local-llm"
+    # llama-server doesn't authenticate; the OpenAI SDK still demands a
+    # non-empty value.
     local_ai_api_key: str = "dummy"
+    # KV cache context window in tokens.
+    local_ai_ctx_size: int = 16384
     # Enable chain-of-thought ("reasoning_content") for local models that
     # support it (Qwen 3.5/3.6, DeepSeek-R1-distilled, etc.). Reasoning gives
     # noticeably better analysis quality at the cost of inference time
@@ -128,6 +144,19 @@ class Settings(BaseSettings):
     # (NEXT_PUBLIC_TURNSTILE_SITE_KEY) and ``turnstile_secret_key`` here.
     turnstile_enabled: bool = False
     turnstile_secret_key: str = ""
+
+    # --- Admin Docker control (optional, opt-in) ---
+    # When True the admin UI exposes a "System" card that lists the compose
+    # stack containers and lets admins start/stop/restart them — and the
+    # local-ai container is auto-started/stopped when ai_provider toggles.
+    # Requires ``/var/run/docker.sock`` mounted into the backend container.
+    # Security: equivalent to root on the host. Only enable on single-tenant
+    # self-hosted instances where the admin is also the host operator.
+    admin_docker_control: bool = False
+    # Compose project name; defaults to "wow-ai-log-analyzer" (matches the
+    # ``name:`` directive in docker-compose.yml). Used to filter the list of
+    # visible containers so we never expose containers from unrelated projects.
+    docker_compose_project: str = "wow-ai-log-analyzer"
 
     # ---- derived ----
     @computed_field  # type: ignore[misc]

@@ -4,7 +4,7 @@ from __future__ import annotations
 import enum
 import uuid
 
-from sqlalchemy import Enum as PgEnum, ForeignKey, String, Text
+from sqlalchemy import Boolean, Enum as PgEnum, ForeignKey, String, Text
 from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -47,6 +47,10 @@ class Analysis(Base, TimestampMixin):
         nullable=False,
         index=True,
     )
+    # True when the request used the user's own BYOK AI config (their
+    # profile-stored API key) instead of the app-wide one. The worker reads
+    # this to decide which provider to build.
+    uses_byok: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
     provider: Mapped[str] = mapped_column(String(32), default="anthropic", nullable=False)
     # Model identifiers can be long (e.g. local Ollama tags like
     # ``hf.co/<author>/<repo>:<quant>`` easily hit 80+ chars).

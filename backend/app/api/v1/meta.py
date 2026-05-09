@@ -22,10 +22,16 @@ async def public_config(session: SessionDep) -> dict[str, object]:
     rows = (await session.execute(select(AppSetting))).scalars().all()
     cfg = {row.key: row.value for row in rows}
     allow_reg_value = cfg.get("allow_registration") or {}
+    ai_provider_value = cfg.get("ai_provider") or {}
+    active_ai = ai_provider_value.get("value") or settings.ai_provider
     return {
         "app_name": settings.app_name,
         "supported_locales": ["en", "de"],
         "allow_registration": bool(allow_reg_value.get("enabled", settings.allow_registration)),
+        # ``ai_enabled = false`` → admin set ``ai_provider=disabled``.
+        # Frontend uses this to grey out the "Analyze with app AI" button.
+        "ai_enabled": active_ai != "disabled",
+        "captcha_enabled": settings.turnstile_enabled,
     }
 
 

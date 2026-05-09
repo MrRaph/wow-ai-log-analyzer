@@ -77,15 +77,50 @@ async def fetch_latest_build(client: httpx.AsyncClient | None = None) -> str:
 
 
 async def _download_csv(client: httpx.AsyncClient, table: str, build: str, locale_code: str) -> str:
+    """Download a single CSV with bounded retries.
+
+    wago.tools returns 502/503/504 fairly often for large tables on fresh
+    builds (the file is regenerated lazily on first request and the
+    upstream proxy times out before the worker finishes). Retrying after
+    a short wait almost always succeeds — by the time we come back, the
+    file is cached. We retry on any HTTPError (timeout, connection reset,
+    5xx) up to 4 times with exponential backoff capped at 30 s.
+    """
+    import asyncio
+
     url = f"{WAGO_BASE}/db2/{table}/csv"
-    try:
-        resp = await client.get(url, params={"build": build, "locale": locale_code})
-        resp.raise_for_status()
-    except httpx.HTTPError as exc:
-        raise UpstreamError(f"wago.tools CSV {table} ({locale_code}) failed: {exc}") from exc
-    if "text/csv" not in (resp.headers.get("content-type") or ""):
-        raise UpstreamError(f"wago.tools returned non-CSV for {table}: {resp.text[:200]}")
-    return resp.text
+    max_attempts = 4
+    last_exc: Exception | None = None
+    for attempt in range(1, max_attempts + 1):
+        try:
+            resp = await client.get(url, params={"build": build, "locale": locale_code})
+            resp.raise_for_status()
+            if "text/csv" not in (resp.headers.get("content-type") or ""):
+                raise UpstreamError(
+                    f"wago.tools returned non-CSV for {table}: {resp.text[:200]}"
+                )
+            return resp.text
+        except httpx.HTTPError as exc:
+            last_exc = exc
+            # Don't retry on 4xx — that's a client bug (wrong build/table).
+            status = getattr(getattr(exc, "response", None), "status_code", None)
+            if status is not None and 400 <= status < 500:
+                break
+            if attempt == max_attempts:
+                break
+            backoff = min(30, 2 ** attempt)  # 2s, 4s, 8s, 16s, 32→30
+            logger.warning(
+                "wago.tools CSV %s (%s) attempt %d failed: %s — retrying in %ds",
+                table,
+                locale_code,
+                attempt,
+                exc,
+                backoff,
+            )
+            await asyncio.sleep(backoff)
+    raise UpstreamError(
+        f"wago.tools CSV {table} ({locale_code}) failed after {max_attempts} attempts: {last_exc}"
+    ) from last_exc
 
 
 def _iter_rows(csv_text: str) -> Iterable[dict[str, str]]:
@@ -132,11 +167,24 @@ async def _upsert_localizations(
 
 
 async def _import_spell_names(
-    session: AsyncSession, client: httpx.AsyncClient, build: str
+    session: AsyncSession, client: httpx.AsyncClient, build: str, missing: list[str]
 ) -> int:
+    """Import SpellName for every locale we know.
+
+    A per-locale download failure (typical: deDE 504 because Blizzard
+    publishes localized strings hours after enUS for fresh builds) does
+    NOT abort the whole run — we log the locale, append it to ``missing``
+    so the orchestrator can put it in the import notes, and move on. EN
+    rows are usually enough; locales fill in on the next refresh.
+    """
     total = 0
     for locale_short, locale_code in LOCALES:
-        text = await _download_csv(client, "SpellName", build, locale_code)
+        try:
+            text = await _download_csv(client, "SpellName", build, locale_code)
+        except UpstreamError as exc:
+            logger.warning("SpellName/%s skipped: %s", locale_code, exc)
+            missing.append(f"SpellName/{locale_code}")
+            continue
         rows: list[dict[str, Any]] = []
         for entry in _iter_rows(text):
             try:
@@ -162,11 +210,16 @@ async def _import_spell_names(
 
 
 async def _import_items(
-    session: AsyncSession, client: httpx.AsyncClient, build: str
+    session: AsyncSession, client: httpx.AsyncClient, build: str, missing: list[str]
 ) -> int:
     total = 0
     for locale_short, locale_code in LOCALES:
-        text = await _download_csv(client, "ItemSparse", build, locale_code)
+        try:
+            text = await _download_csv(client, "ItemSparse", build, locale_code)
+        except UpstreamError as exc:
+            logger.warning("ItemSparse/%s skipped: %s", locale_code, exc)
+            missing.append(f"ItemSparse/{locale_code}")
+            continue
         rows: list[dict[str, Any]] = []
         for entry in _iter_rows(text):
             try:
@@ -205,11 +258,16 @@ async def _import_items(
 
 
 async def _import_encounters(
-    session: AsyncSession, client: httpx.AsyncClient, build: str
+    session: AsyncSession, client: httpx.AsyncClient, build: str, missing: list[str]
 ) -> int:
     total = 0
     for locale_short, locale_code in LOCALES:
-        text = await _download_csv(client, "JournalEncounter", build, locale_code)
+        try:
+            text = await _download_csv(client, "JournalEncounter", build, locale_code)
+        except UpstreamError as exc:
+            logger.warning("JournalEncounter/%s skipped: %s", locale_code, exc)
+            missing.append(f"JournalEncounter/{locale_code}")
+            continue
         rows: list[dict[str, Any]] = []
         for entry in _iter_rows(text):
             try:
@@ -284,6 +342,12 @@ async def run_full_import(session: AsyncSession, *, build: str | None = None) ->
         )
         await session.commit()
 
+        # Two cases for an "already in progress" row:
+        #   1) Same build is already running → return it (idempotent).
+        #   2) A "(pending)" placeholder row was just inserted by the API
+        #      endpoint so the frontend's status chip flips to in_progress
+        #      immediately. Adopt that row here, fill in the real build,
+        #      and continue — no second row needed.
         existing = (
             await session.execute(
                 select(WowDataImport)
@@ -298,31 +362,78 @@ async def run_full_import(session: AsyncSession, *, build: str | None = None) ->
             logger.info("WoW data import for build %s is already in progress", build)
             return existing
 
-        run = WowDataImport(
-            id=uuid.uuid4(),
-            build=build,
-            status=WowImportStatus.in_progress.value,
-            started_at=datetime.now(UTC),
-            rows_imported=0,
-            source="wago.tools",
-        )
-        session.add(run)
-        await session.commit()
-
-        try:
-            spells = await _import_spell_names(session, client, build)
-            items = await _import_items(session, client, build)
-            encounters = await _import_encounters(session, client, build)
-            run.rows_imported = spells + items + encounters
-            run.status = WowImportStatus.success.value
-            run.finished_at = datetime.now(UTC)
-            run.notes = (
-                f"spells={spells} items={items} encounters={encounters}"
+        pending = (
+            await session.execute(
+                select(WowDataImport)
+                .where(
+                    WowDataImport.build == "(pending)",
+                    WowDataImport.status == WowImportStatus.in_progress.value,
+                )
+                .order_by(WowDataImport.started_at.desc())
+                .limit(1)
             )
+        ).scalar_one_or_none()
+        if pending is not None:
+            run = pending
+            run.build = build
+            run.phase = "starting"
+            await session.commit()
+        else:
+            run = WowDataImport(
+                id=uuid.uuid4(),
+                build=build,
+                status=WowImportStatus.in_progress.value,
+                started_at=datetime.now(UTC),
+                rows_imported=0,
+                source="wago.tools",
+                phase="starting",
+            )
+            session.add(run)
+            await session.commit()
+
+        async def _set_phase(phase: str) -> None:
+            run.phase = phase
+            await session.commit()
+
+        # Per-locale failures are appended here. If at least the EN side
+        # of every kind made it through, we still flip the run to success
+        # — the German strings will fill in on the next refresh once
+        # Blizzard publishes them for this build.
+        missing: list[str] = []
+        try:
+            await _set_phase("spells")
+            spells = await _import_spell_names(session, client, build, missing)
+            await _set_phase("items")
+            items = await _import_items(session, client, build, missing)
+            await _set_phase("encounters")
+            encounters = await _import_encounters(session, client, build, missing)
+            run.rows_imported = spells + items + encounters
+            run.finished_at = datetime.now(UTC)
+            run.phase = ""
+
+            # Decide whether we have enough to call this a success: at least
+            # one locale must have landed for each table. Otherwise wago.tools
+            # was completely unreachable and we mark the run failed so the
+            # admin UI doesn't claim "Aktuell" for a half-empty cache.
+            if spells == 0 or items == 0 or encounters == 0:
+                run.status = WowImportStatus.failed.value
+                run.notes = (
+                    f"no rows imported (missing: {', '.join(missing) or 'all'})"
+                )[:1000]
+            else:
+                run.status = WowImportStatus.success.value
+                base = f"spells={spells} items={items} encounters={encounters}"
+                if missing:
+                    base += (
+                        f" — partial (missing locales: {', '.join(missing)}); "
+                        f"will retry on next refresh."
+                    )
+                run.notes = base[:1000]
         except Exception as exc:  # noqa: BLE001
             logger.exception("WoW data import failed for build %s", build)
             run.status = WowImportStatus.failed.value
             run.finished_at = datetime.now(UTC)
+            run.phase = ""
             run.notes = str(exc)[:1000]
             await session.commit()
             raise

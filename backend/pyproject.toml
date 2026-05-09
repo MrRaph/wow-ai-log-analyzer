@@ -29,6 +29,10 @@ dependencies = [
     "redis>=5.2",
     "orjson>=3.10",
     "python-slugify>=8.0",
+    # Optional, only used when ADMIN_DOCKER_CONTROL=true. Bundled
+    # unconditionally so the import doesn't fail when the feature is
+    # toggled on without rebuilding the image.
+    "docker>=7.1",
 ]
 
 [dependency-groups]

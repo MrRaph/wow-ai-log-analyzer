@@ -35,11 +35,28 @@ export function WowDataCard({ locale }: { locale: Locale }) {
     lastImport.build !== status.latest_known_build &&
     lastImport.status === "success";
 
+  // "Aktuell" only when the last import succeeded AND no newer wago.tools
+  // build has been published since. Otherwise "Update verfügbar" so the
+  // header chip doesn't contradict the warning banner below.
+  // While in_progress, show the current phase ("Lade Items…") so the user
+  // knows the worker is alive.
+  const phaseLabels: Record<string, string> = {
+    starting: t("admin.wowDataPhaseStarting"),
+    spells: t("admin.wowDataPhaseSpells"),
+    items: t("admin.wowDataPhaseItems"),
+    encounters: t("admin.wowDataPhaseEncounters"),
+  };
+  const phaseLabel = lastImport?.phase ? phaseLabels[lastImport.phase] ?? "" : "";
+
   const statusLabel = lastImport
     ? lastImport.status === "in_progress"
-      ? t("admin.wowDataStatusInProgress")
+      ? phaseLabel
+        ? `${t("admin.wowDataStatusInProgress")} · ${phaseLabel}`
+        : t("admin.wowDataStatusInProgress")
       : lastImport.status === "success"
-        ? t("admin.wowDataStatusSuccess")
+        ? newerAvailable
+          ? t("admin.wowDataStatusOutdated")
+          : t("admin.wowDataStatusSuccess")
         : t("admin.wowDataStatusFailed")
     : t("admin.wowDataStatusNone");
 
@@ -47,7 +64,9 @@ export function WowDataCard({ locale }: { locale: Locale }) {
     ? lastImport.status === "in_progress"
       ? "text-yellow-300"
       : lastImport.status === "success"
-        ? "text-emerald-300"
+        ? newerAvailable
+          ? "text-yellow-300"
+          : "text-emerald-300"
         : "text-red-300"
     : "text-zinc-400";
 

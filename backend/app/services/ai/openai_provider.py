@@ -24,9 +24,29 @@ Mode = Literal["openai", "local"]
 
 
 class OpenAiCompatibleProvider:
-    def __init__(self, *, mode: Mode) -> None:
+    def __init__(
+        self,
+        *,
+        mode: Mode,
+        api_key: str | None = None,
+        base_url: str | None = None,
+        model: str | None = None,
+    ) -> None:
+        """Build a provider.
+
+        When ``api_key``/``base_url``/``model`` are passed (BYOK path: a user
+        has stored their own key in their profile), those win. Otherwise we
+        fall back to the app-wide settings — that's the legacy admin-managed
+        path used when an analysis is triggered without ``use_own_ai=true``.
+        """
         self._mode = mode
-        if mode == "openai":
+        if api_key is not None:
+            # BYOK / user-config path. Trust whatever the caller hands us.
+            self._client = AsyncOpenAI(api_key=api_key, base_url=base_url or None)
+            self._default_model = model or (
+                settings.ai_model if mode == "openai" else settings.local_ai_model
+            )
+        elif mode == "openai":
             if not settings.openai_api_key:
                 raise UpstreamError("OPENAI_API_KEY is not configured.")
             self._client = AsyncOpenAI(

@@ -135,6 +135,24 @@ query ReportRankings(
 """
 
 
+# All zones WCL knows about. Each zone has its expansion + encounters list,
+# plus a ``brackets`` block we ignore. We use this to discover the current
+# retail raid tier without hardcoding encounter IDs.
+WORLD_ZONES = """
+query WorldZones {
+  worldData {
+    zones {
+      id
+      name
+      frozen
+      expansion { id name }
+      encounters { id name }
+    }
+  }
+}
+"""
+
+
 # Top rankings — extended with serverRegion + difficulty filters.
 ENCOUNTER_RANKINGS = """
 query EncounterRankings(

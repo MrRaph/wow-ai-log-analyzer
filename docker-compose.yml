@@ -47,6 +47,13 @@ services:
         condition: service_healthy
       redis:
         condition: service_healthy
+    # Optional Docker socket mount for the admin "System" card
+    # (ADMIN_DOCKER_CONTROL=true). Equivalent to root on the host —
+    # only enable on single-tenant self-hosted instances. The mount
+    # itself is harmless when ADMIN_DOCKER_CONTROL=false (the service
+    # never reads the socket).
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
     ports:
       # Bind only to loopback so the reverse proxy on the host (Caddy/nginx)
       # can reach it but nothing on the public internet can.
@@ -101,34 +108,30 @@ services:
   #   docker compose --profile local-ai up -d
   # Requires NVIDIA Container Toolkit + driver on the host.
   #
-  # We use llama.cpp's official server image rather than Ollama because Ollama
-  # bundles a forked llama.cpp that lags behind upstream — bleeding-edge model
-  # architectures (e.g. qwen35moe) only work with the official upstream build.
-  # llama-server downloads the GGUF directly from Hugging Face on first start
-  # and caches it in the llama-cache volume.
+  # We use llama.cpp's official upstream server-cuda image (Ollama lags
+  # behind on bleeding-edge model architectures, e.g. qwen35moe) and wrap
+  # it with a small Python supervisor so the backend can switch models,
+  # delete cached GGUFs and stop inference WITHOUT needing Docker socket
+  # access. The supervisor persists its config in /cache so admin changes
+  # survive container restarts.
   local-ai:
     profiles: ["local-ai"]
-    image: ghcr.io/ggml-org/llama.cpp:server-cuda
+    build:
+      context: ./local-ai
+      dockerfile: Dockerfile
     restart: unless-stopped
-    command:
-      - --host
-      - 0.0.0.0
-      - --port
-      - "8080"
-      - --hf-repo
-      - ${LOCAL_AI_HF_REPO:?LOCAL_AI_HF_REPO must be set}
-      - --hf-file
-      - ${LOCAL_AI_HF_FILE:?LOCAL_AI_HF_FILE must be set}
-      - --alias
-      - ${LOCAL_AI_MODEL:?LOCAL_AI_MODEL must be set}
-      - --n-gpu-layers
-      - "999"
-      - --ctx-size
-      - "${LOCAL_AI_CTX_SIZE:-16384}"
-      - --jinja
     environment:
       HF_TOKEN: ${HUGGINGFACE_TOKEN:-}
       LLAMA_CACHE: /cache
+      # Initial defaults — the supervisor seeds its persisted state from
+      # these on first boot. Once an admin saves config in the UI the
+      # /cache/supervisor-state.json file overrides them on subsequent
+      # boots.
+      LOCAL_AI_HF_REPO: ${LOCAL_AI_HF_REPO:-}
+      LOCAL_AI_HF_FILE: ${LOCAL_AI_HF_FILE:-}
+      LOCAL_AI_MODEL: ${LOCAL_AI_MODEL:-local-llm}
+      LOCAL_AI_CTX_SIZE: ${LOCAL_AI_CTX_SIZE:-16384}
+      LOCAL_AI_ENABLE_THINKING: ${LOCAL_AI_ENABLE_THINKING:-true}
       # The :server-cuda image ships the CUDA backend at /app/libggml-cuda.so
       # but doesn't set LD_LIBRARY_PATH for it, so the runtime dlopen falls
       # back to "no usable GPU found". Make the dependent libs reachable:
@@ -143,16 +146,18 @@ services:
               count: all
               capabilities: ["gpu"]
     expose:
-      - "8080"
+      - "8080"  # llama-server inference (managed by supervisor)
+      - "8081"  # supervisor management API
     healthcheck:
-      # llama-server has /health while loading and /v1/models once ready.
-      test: ["CMD-SHELL", "exec 3<>/dev/tcp/127.0.0.1/8080 && echo -e 'GET /v1/models HTTP/1.1\\r\\nHost: x\\r\\n\\r\\n' >&3 && head -1 <&3 | grep -q '200'"]
+      # The supervisor responds on :8081 even while the model is still
+      # downloading or the child is stopped — that's the right liveness
+      # signal here. /v1/models on :8080 only goes 200 once a model is
+      # loaded, which can be 10-40 min after first boot.
+      test: ["CMD-SHELL", "exec 3<>/dev/tcp/127.0.0.1/8081 && echo -e 'GET /healthz HTTP/1.1\\r\\nHost: x\\r\\n\\r\\n' >&3 && head -1 <&3 | grep -q '200'"]
       interval: 30s
       timeout: 10s
       retries: 5
-      # Generous start period: first-run model download (~21 GB for Q4_K_M)
-      # plus model load into VRAM can easily take 10-40 min.
-      start_period: 2400s
+      start_period: 60s
 
 volumes:
   postgres-data:

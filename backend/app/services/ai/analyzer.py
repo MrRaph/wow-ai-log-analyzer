@@ -58,7 +58,7 @@ async def _resolve_provider_choice(session: AsyncSession) -> str:
     ).scalar_one_or_none()
     if row and row.value:
         chosen = (row.value or {}).get("value")
-        if chosen in _VALID_PROVIDERS:
+        if chosen in _VALID_PROVIDERS or chosen == "disabled":
             return chosen
     return settings.ai_provider
 
@@ -661,15 +661,47 @@ async def request_analysis(
         references=references,
     )
 
-    chosen_provider = await _resolve_provider_choice(session)
-    chosen_model = await _resolve_model(session, chosen_provider)
+    # If the row already exists (worker path), it tells us whether BYOK was
+    # requested. New rows fall through to the app-wide path.
+    existing_row: Analysis | None = None
     if analysis_id is not None:
-        # Worker path: take over the pending row instead of creating a fresh one.
-        analysis = (
+        existing_row = (
             await session.execute(select(Analysis).where(Analysis.id == analysis_id))
         ).scalar_one_or_none()
-        if analysis is None:
+        if existing_row is None:
             raise NotFoundError("Analysis row was deleted before the worker picked it up.")
+
+    use_byok = bool(existing_row and existing_row.uses_byok)
+
+    if use_byok:
+        # BYOK path: build provider from the requesting user's stored config.
+        from app.services.user_ai_service import (
+            get_config as _get_user_ai_cfg,
+            provider_for_user_config,
+        )
+
+        user_cfg = (
+            await _get_user_ai_cfg(session, requested_by_id) if requested_by_id else None
+        )
+        if user_cfg is None:
+            raise UpstreamError(
+                "BYOK requested but the user has no AI configuration on file."
+            )
+        used_provider = provider or provider_for_user_config(user_cfg)
+        chosen_provider = f"byok:{user_cfg.provider_type}"
+        chosen_model = user_cfg.model
+    else:
+        chosen_provider = await _resolve_provider_choice(session)
+        if chosen_provider == "disabled":
+            raise UpstreamError(
+                "App-wide AI analysis is disabled by the admin. Configure your "
+                "own AI provider in your profile and try again."
+            )
+        chosen_model = await _resolve_model(session, chosen_provider)
+        used_provider = provider or _provider_for(chosen_provider)
+
+    if existing_row is not None:
+        analysis = existing_row
         analysis.status = AnalysisStatus.running
         analysis.provider = chosen_provider
         analysis.model = chosen_model
@@ -686,8 +718,6 @@ async def request_analysis(
         )
         session.add(analysis)
     await session.flush()
-
-    used_provider = provider or _provider_for(chosen_provider)
     user_prompt = build_user_prompt(
         locale=locale if locale in ("en", "de") else "en",  # type: ignore[arg-type]
         role_focus=role_focus,  # type: ignore[arg-type]

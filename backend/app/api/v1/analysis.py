@@ -42,9 +42,37 @@ async def create_analysis(
 
     Returns 202 with ``status="pending"``. The frontend polls
     ``GET /analyses/{id}`` until ``status`` is ``succeeded`` or ``failed``.
-    The actual model call (often 30-90s on a local LLM with thinking) runs
-    on the arq worker so the HTTP request returns in milliseconds.
     """
+    if payload.use_own_ai:
+        # User wants the BYOK path — they must have a config saved.
+        from app.services.user_ai_service import get_config as _get_user_ai_cfg
+
+        cfg = await _get_user_ai_cfg(session, user.id)
+        if cfg is None:
+            raise ForbiddenError(
+                "You do not have a personal AI configuration. Add one in "
+                "your profile, or run the analysis with the app-wide AI."
+            )
+    else:
+        # Validate the app-wide AI is actually available.
+        from app.models import AppSetting
+
+        setting = (
+            await session.execute(
+                select(AppSetting).where(AppSetting.key == "ai_provider")
+            )
+        ).scalar_one_or_none()
+        active = (setting.value or {}).get("value") if setting and setting.value else None
+        if active is None:
+            from app.config import settings as _s
+
+            active = _s.ai_provider
+        if active == "disabled":
+            raise ForbiddenError(
+                "The app-wide AI analysis has been disabled by the admin. "
+                "Use your own AI configuration from the profile page."
+            )
+
     placeholder = Analysis(
         requested_by_id=user.id,
         report_id=payload.report_id,
@@ -54,6 +82,7 @@ async def create_analysis(
         status=AnalysisStatus.pending,
         provider="",
         model="",
+        uses_byok=payload.use_own_ai,
     )
     session.add(placeholder)
     await session.commit()

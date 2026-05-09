@@ -15,11 +15,12 @@ logger = logging.getLogger(__name__)
 
 
 class AnthropicProvider:
-    def __init__(self, *, api_key: str | None = None) -> None:
+    def __init__(self, *, api_key: str | None = None, model: str | None = None) -> None:
         key = api_key or settings.anthropic_api_key
         if not key:
             raise UpstreamError("ANTHROPIC_API_KEY is not configured.")
         self._client = AsyncAnthropic(api_key=key)
+        self._default_model = model or settings.ai_model
 
     async def generate_structured(
         self,
@@ -30,7 +31,7 @@ class AnthropicProvider:
         max_tokens: int | None = None,
         temperature: float = 0.2,
     ) -> AiResponse:
-        chosen_model = model or settings.ai_model
+        chosen_model = model or self._default_model
         max_t = max_tokens or settings.ai_max_tokens
         try:
             message = await self._client.messages.create(

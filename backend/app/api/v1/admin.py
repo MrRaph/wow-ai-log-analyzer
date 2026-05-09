@@ -11,6 +11,15 @@ from app.config import settings
 from app.core.errors import ForbiddenError, NotFoundError
 from app.deps import AdminUser, SessionDep
 from app.models import AppSetting, Invite, Report, User, UserRole
+from app.schemas.system import (
+    ContainerOut,
+    LocalAiConfigPatch,
+    LocalAiModelFile,
+    LocalAiStatusOut,
+    SystemStatusOut,
+)
+from app.services import docker_control, local_ai_supervisor_service as supervisor
+from app.core.errors import UpstreamError
 from app.schemas.user import (
     AdminSettingsOut,
     AdminSettingsUpdate,
@@ -52,16 +61,39 @@ async def _upsert_setting(session, key: str, value: dict) -> None:
 
 @router.patch("/settings", response_model=AdminSettingsOut)
 async def update_settings(
-    payload: AdminSettingsUpdate, session: SessionDep, _: AdminUser
+    payload: AdminSettingsUpdate, session: SessionDep, admin: AdminUser
 ) -> AdminSettingsOut:
     if payload.allow_registration is not None:
         await _upsert_setting(session, "allow_registration", {"enabled": payload.allow_registration})
-    if payload.ai_provider is not None:
+    ai_provider_changed = payload.ai_provider is not None
+    if ai_provider_changed:
         await _upsert_setting(session, "ai_provider", {"value": payload.ai_provider})
     if payload.ai_model is not None:
         await _upsert_setting(session, "ai_model", {"value": payload.ai_model})
     await session.commit()
-    return await read_settings(session, _)
+
+    # When the provider toggles, align the local-ai container *and* its
+    # supervisor's desired-running flag. Two layers because they answer
+    # different questions:
+    #
+    #   docker_control.ensure_local_ai → flips the whole container on/off
+    #     (no-op when ADMIN_DOCKER_CONTROL=false or local-ai container
+    #     was never created).
+    #   supervisor.ensure_running     → tells the running supervisor to
+    #     spawn or terminate llama-server inside the container (no-op
+    #     when supervisor is unreachable, e.g. just-started container).
+    #
+    # docker_control runs first so the container is up by the time the
+    # supervisor call lands.
+    if ai_provider_changed:
+        target_running = payload.ai_provider == "local"
+        try:
+            await docker_control.ensure_local_ai(target_running)
+        except Exception:  # noqa: BLE001
+            logger = __import__("logging").getLogger(__name__)
+            logger.exception("docker_control.ensure_local_ai failed")
+        await supervisor.ensure_running(target_running)
+    return await read_settings(session, admin)
 
 
 # --- Invites ------------------------------------------------------------------
@@ -151,3 +183,117 @@ async def delete_user(
     await session.flush()
     await session.delete(user)
     await session.commit()
+
+
+# --- System (docker control, opt-in) -----------------------------------------
+
+
+def _to_container_out(info: docker_control.ContainerInfo) -> ContainerOut:
+    return ContainerOut(
+        name=info.name,
+        service=info.service,
+        image=info.image,
+        status=info.status,
+        health=info.health,
+        started_at=info.started_at,
+        finished_at=info.finished_at,
+        is_local_ai=info.is_local_ai,
+    )
+
+
+@router.get("/system", response_model=SystemStatusOut)
+async def read_system_status(_: AdminUser) -> SystemStatusOut:
+    """Return ``enabled=False`` (no error) when ADMIN_DOCKER_CONTROL is off,
+    so the frontend can hide the System card without surfacing a scary
+    network error to the admin."""
+    if not settings.admin_docker_control:
+        return SystemStatusOut(
+            enabled=False,
+            project=settings.docker_compose_project,
+            containers=[],
+        )
+    try:
+        items = await docker_control.list_stack_containers()
+    except Exception as exc:  # noqa: BLE001
+        # Fail soft — admin sees an empty list with a clear server log line.
+        logger = __import__("logging").getLogger(__name__)
+        logger.exception("docker list_stack_containers failed: %s", exc)
+        return SystemStatusOut(
+            enabled=True,
+            project=settings.docker_compose_project,
+            containers=[],
+        )
+    return SystemStatusOut(
+        enabled=True,
+        project=settings.docker_compose_project,
+        containers=[_to_container_out(i) for i in items],
+    )
+
+
+@router.post("/system/containers/{name}/restart", response_model=ContainerOut)
+async def restart_container(name: str, _: AdminUser) -> ContainerOut:
+    return _to_container_out(await docker_control.restart(name))
+
+
+@router.post("/system/containers/{name}/start", response_model=ContainerOut)
+async def start_container(name: str, _: AdminUser) -> ContainerOut:
+    return _to_container_out(await docker_control.start(name))
+
+
+@router.post("/system/containers/{name}/stop", response_model=ContainerOut)
+async def stop_container(name: str, _: AdminUser) -> ContainerOut:
+    return _to_container_out(await docker_control.stop(name))
+
+
+# --- Local-AI supervisor (model download / switch / cache cleanup) ---------
+#
+# These endpoints are thin wrappers over the local-ai sidecar's management
+# API. They return ``reachable=False`` (rather than 502) when the
+# supervisor isn't up so the admin UI can render the card with a clear
+# "container not running" hint instead of an alert dialog.
+
+
+@router.get("/local-ai/status", response_model=LocalAiStatusOut)
+async def read_local_ai_status(_: AdminUser) -> LocalAiStatusOut:
+    try:
+        data = await supervisor.get_status()
+    except UpstreamError:
+        return LocalAiStatusOut(reachable=False)
+    return LocalAiStatusOut(reachable=True, **data)
+
+
+@router.patch("/local-ai/config", response_model=LocalAiStatusOut)
+async def patch_local_ai_config(
+    payload: LocalAiConfigPatch, _: AdminUser
+) -> LocalAiStatusOut:
+    data = await supervisor.patch_config(
+        config=payload.config.model_dump() if payload.config else None,
+        desired_running=payload.desired_running,
+    )
+    return LocalAiStatusOut(reachable=True, **data)
+
+
+@router.post("/local-ai/start", response_model=LocalAiStatusOut)
+async def start_local_ai(_: AdminUser) -> LocalAiStatusOut:
+    data = await supervisor.start_inference()
+    return LocalAiStatusOut(reachable=True, **data)
+
+
+@router.post("/local-ai/stop", response_model=LocalAiStatusOut)
+async def stop_local_ai(_: AdminUser) -> LocalAiStatusOut:
+    data = await supervisor.stop_inference()
+    return LocalAiStatusOut(reachable=True, **data)
+
+
+@router.get("/local-ai/models", response_model=list[LocalAiModelFile])
+async def list_local_ai_models(_: AdminUser) -> list[LocalAiModelFile]:
+    try:
+        rows = await supervisor.list_models()
+    except UpstreamError:
+        return []
+    return [LocalAiModelFile(**r) for r in rows]
+
+
+@router.delete("/local-ai/models/{filename}", status_code=status.HTTP_204_NO_CONTENT)
+async def delete_local_ai_model(filename: str, _: AdminUser) -> None:
+    await supervisor.delete_model(filename)

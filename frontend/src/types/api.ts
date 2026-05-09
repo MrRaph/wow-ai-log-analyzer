@@ -24,6 +24,84 @@ export interface PublicConfig {
   app_name: string;
   supported_locales: string[];
   allow_registration: boolean;
+  ai_enabled: boolean;
+  captcha_enabled: boolean;
+}
+
+export type AiProviderType = "anthropic" | "openai" | "openai_compatible";
+
+export interface UserAiConfig {
+  provider_type: AiProviderType;
+  base_url: string | null;
+  model: string;
+  label: string;
+  api_key_masked: string;
+}
+
+export interface UserAiConfigInput {
+  provider_type: AiProviderType;
+  base_url?: string;
+  model: string;
+  api_key: string;
+  label?: string;
+}
+
+export interface UserAiConfigTestResult {
+  ok: boolean;
+  detail: string;
+  latency_ms: number | null;
+}
+
+export interface ContainerStatus {
+  name: string;
+  service: string;
+  image: string;
+  status: string;
+  health: string | null;
+  started_at: string | null;
+  finished_at: string | null;
+  is_local_ai: boolean;
+}
+
+export interface SystemStatus {
+  enabled: boolean;
+  project: string;
+  containers: ContainerStatus[];
+}
+
+export interface LocalAiModelConfig {
+  hf_repo: string;
+  hf_file: string;
+  alias: string;
+  ctx_size: number;
+  enable_thinking: boolean;
+}
+
+export interface LocalAiDownloadProgress {
+  filename: string;
+  bytes_done: number;
+  bytes_total: number | null;
+  percent: number | null;
+  started_at: number;
+  finished_at: number | null;
+  error: string | null;
+}
+
+export interface LocalAiStatus {
+  reachable: boolean;
+  config: LocalAiModelConfig | null;
+  desired_running: boolean;
+  child_running: boolean;
+  child_healthy: boolean;
+  current_model_filename: string | null;
+  download: LocalAiDownloadProgress | null;
+  last_error: string | null;
+}
+
+export interface LocalAiModelFile {
+  filename: string;
+  size_bytes: number;
+  is_loaded: boolean;
 }
 
 export interface GameSpec {
@@ -282,6 +360,7 @@ export interface WowDataImport {
   rows_imported: number;
   source: string;
   notes: string;
+  phase: string;
 }
 
 export interface WowDataStatus {
@@ -297,4 +376,33 @@ export interface TopLogsEncounterRow {
   metrics: string[];
   rows: number;
   latest_recorded_at: string | null;
+}
+
+export interface TopLogsSeedJob {
+  id: string;
+  encounter_id: number;
+  encounter_name: string;
+  is_raid: boolean;
+  metric_filter: "dps" | "hps" | null;
+  total_specs: number;
+  completed_specs: number;
+  current_spec_slug: string | null;
+  status: "queued" | "running" | "succeeded" | "failed";
+  started_at: string | null;
+  finished_at: string | null;
+  error: string | null;
+  created_at: string;
+}
+
+export interface TopLogsCurrentTierResponse {
+  queued: number;
+  skipped_already_running: number;
+  encounters: Array<{
+    encounter_id: number;
+    encounter_name: string;
+    zone_id: number;
+    zone_name: string;
+    expansion_id: number;
+    expansion_name: string;
+  }>;
 }

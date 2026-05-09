@@ -7,6 +7,8 @@ import { use, useEffect, useState } from "react";
 
 import { AuthGuard } from "@/components/AuthGuard";
 import { Button, Card, Input, Label, Select } from "@/components/ui";
+import { LocalAiCard } from "@/components/admin/LocalAiCard";
+import { SystemCard } from "@/components/admin/SystemCard";
 import { TopLogsToolsCard } from "@/components/admin/TopLogsToolsCard";
 import { WowDataCard } from "@/components/admin/WowDataCard";
 import { ApiClientError, apiFetch } from "@/lib/api";
@@ -58,7 +60,13 @@ function AdminView({ locale, currentUserId }: { locale: Locale; currentUserId: s
         method: "PATCH",
         body: { allow_registration: allowReg, ai_provider: provider, ai_model: model },
       }),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ["admin-settings"] }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["admin-settings"] });
+      // The public config (ai_enabled flag) is derived from ai_provider —
+      // invalidating it here makes the analyze-page buttons flip on next
+      // mount instead of waiting on the 5 min staleTime.
+      qc.invalidateQueries({ queryKey: ["public-config"] });
+    },
   });
 
   const [inviteEmail, setInviteEmail] = useState("");
@@ -121,16 +129,31 @@ function AdminView({ locale, currentUserId }: { locale: Locale; currentUserId: s
               <option value="anthropic">Anthropic Claude</option>
               <option value="openai">OpenAI</option>
               <option value="local">Local (llama.cpp)</option>
+              <option value="disabled">{t("admin.aiProviderDisabled")}</option>
             </Select>
+            {provider === "disabled" && (
+              <p className="mt-1 text-xs text-amber-300">
+                {t("admin.aiProviderDisabledHint")}
+              </p>
+            )}
           </div>
           <div>
             <Label>{t("admin.aiModel")}</Label>
             {provider === "local" ? (
-              <input
-                value={model}
-                disabled
-                className="w-full rounded-md border border-bg-3 bg-bg-2 px-3 py-2 text-sm text-zinc-400"
-              />
+              <div className="flex h-[38px] items-center">
+                <a
+                  href="#local-ai-card"
+                  className="text-sm text-amber-300 underline-offset-4 hover:underline"
+                  onClick={(e) => {
+                    e.preventDefault();
+                    document
+                      .getElementById("local-ai-card")
+                      ?.scrollIntoView({ behavior: "smooth", block: "start" });
+                  }}
+                >
+                  {t("admin.aiModelLocalLink")}
+                </a>
+              </div>
             ) : (
               <Select value={model} onChange={(e) => setModel(e.target.value)}>
                 {provider === "anthropic" && (
@@ -148,13 +171,6 @@ function AdminView({ locale, currentUserId }: { locale: Locale; currentUserId: s
                   </>
                 )}
               </Select>
-            )}
-            {provider === "local" && (
-              <p className="mt-1 text-xs text-zinc-500">
-                {locale === "de"
-                  ? "Modell ist durch LOCAL_AI_MODEL in der .env festgelegt. Zum Wechseln den local-ai Container mit dem neuen Modell neu starten."
-                  : "Model is set by LOCAL_AI_MODEL in .env. To switch, restart the local-ai container with the new value."}
-              </p>
             )}
           </div>
         </div>
@@ -226,6 +242,8 @@ function AdminView({ locale, currentUserId }: { locale: Locale; currentUserId: s
 
       <WowDataCard locale={locale} />
       <TopLogsToolsCard locale={locale} />
+      <LocalAiCard />
+      <SystemCard />
 
       <Card className="!p-0 overflow-hidden">
         <div className="px-5 pt-5">

@@ -12,14 +12,17 @@ export function Card({
   children,
   className,
   interactive = false,
+  id,
 }: {
   children: ReactNode;
   className?: string;
   /** Adds a subtle lift + warm glow on hover. Use on list rows / clickable cards. */
   interactive?: boolean;
+  id?: string;
 }) {
   return (
     <div
+      id={id}
       className={clsx(
         "rounded-xl border border-bg-3 bg-bg-1 p-5 shadow-[0_1px_0_rgba(255,255,255,0.04)_inset]",
         interactive &&

@@ -4,13 +4,14 @@ from __future__ import annotations
 from fastapi import APIRouter, status
 from sqlalchemy import delete
 
-from app.core.errors import AuthError, ValidationAppError
+from app.core.errors import AuthError, NotFoundError, ValidationAppError
 from app.core.security import hash_password, verify_password
 from app.deps import CurrentUser, SessionDep
 from app.models import Report
 from app.schemas.user import UserOut, UserUpdateMe
+from app.schemas.user_ai import UserAiConfigIn, UserAiConfigOut, UserAiConfigTestResult
 from app.schemas.wcl import WclConnectionStatus
-from app.services import wcl_oauth_service
+from app.services import user_ai_service, wcl_oauth_service
 
 router = APIRouter()
 
@@ -73,3 +74,42 @@ async def read_wcl_connection(user: CurrentUser, session: SessionDep) -> WclConn
 async def delete_wcl_connection(user: CurrentUser, session: SessionDep) -> None:
     await wcl_oauth_service.disconnect(session, user.id)
     await session.commit()
+
+
+# --- BYOK AI configuration --------------------------------------------------------
+
+
+@router.get("/me/ai-config", response_model=UserAiConfigOut | None)
+async def read_ai_config(
+    user: CurrentUser, session: SessionDep
+) -> UserAiConfigOut | None:
+    cfg = await user_ai_service.get_config(session, user.id)
+    if cfg is None:
+        return None
+    return user_ai_service.to_out(cfg)
+
+
+@router.put("/me/ai-config", response_model=UserAiConfigOut)
+async def update_ai_config(
+    payload: UserAiConfigIn, user: CurrentUser, session: SessionDep
+) -> UserAiConfigOut:
+    cfg = await user_ai_service.upsert_config(session, user.id, payload)
+    await session.commit()
+    return user_ai_service.to_out(cfg)
+
+
+@router.delete("/me/ai-config", status_code=status.HTTP_204_NO_CONTENT)
+async def remove_ai_config(user: CurrentUser, session: SessionDep) -> None:
+    await user_ai_service.delete_config(session, user.id)
+    await session.commit()
+
+
+@router.post("/me/ai-config/test", response_model=UserAiConfigTestResult)
+async def test_ai_config(payload: UserAiConfigIn, _: CurrentUser) -> UserAiConfigTestResult:
+    """Probe the user-supplied credentials before they save them.
+
+    No DB write — the frontend sends the (still-plaintext) form values, we
+    bounce a tiny request off the provider's auth endpoint and report
+    success/failure + latency.
+    """
+    return await user_ai_service.test_config(payload)

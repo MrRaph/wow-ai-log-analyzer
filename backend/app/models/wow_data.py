@@ -57,3 +57,7 @@ class WowDataImport(Base, TimestampMixin):
     rows_imported: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
     source: Mapped[str] = mapped_column(String(32), default="wago.tools", nullable=False)
     notes: Mapped[str] = mapped_column(Text, default="", nullable=False)
+    # Updated by ``run_full_import`` after each phase so the admin UI can
+    # show "Lade Spell-Namen…" / "Lade Items…" / "Lade Encounter…" instead
+    # of just a generic "Importing…". Empty when the run is terminal.
+    phase: Mapped[str] = mapped_column(String(32), default="", nullable=False)

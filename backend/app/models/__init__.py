@@ -6,7 +6,9 @@ from app.models.settings import AppSetting
 from app.models.class_spec import GameClass, GameSpec, Role
 from app.models.report import Report, ReportFight, ReportPlayer, ReportPlayerCast, ReportPlayerGear
 from app.models.top_log import TopLog
+from app.models.top_logs_seed_job import TopLogsSeedJob
 from app.models.analysis import Analysis, AnalysisStatus
+from app.models.user_ai_config import UserAiConfig
 from app.models.wcl_connection import UserWclConnection
 from app.models.wow_data import WowDataImport, WowImportStatus, WowLocalization
 
@@ -25,8 +27,10 @@ __all__ = [
     "ReportPlayerGear",
     "Role",
     "TopLog",
+    "TopLogsSeedJob",
     "User",
     "UserRole",
+    "UserAiConfig",
     "UserWclConnection",
     "WowDataImport",
     "WowImportStatus",

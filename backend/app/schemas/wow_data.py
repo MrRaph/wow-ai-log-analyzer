@@ -19,6 +19,7 @@ class WowDataImportOut(BaseModel):
     rows_imported: int
     source: str
     notes: str
+    phase: str = ""
 
 
 class WowDataStatusOut(BaseModel):
@@ -49,3 +50,37 @@ class TopLogsSeedIn(BaseModel):
     #   "dps" → only non-healer specs (DPS + tanks)
     # Empty/None → all specs (full refresh, current default).
     metric: Literal["dps", "hps"] | None = None
+
+
+class TopLogsSeedJobOut(BaseModel):
+    """Live progress row for the admin UI's seed-jobs section."""
+
+    model_config = ConfigDict(from_attributes=True)
+    id: uuid.UUID
+    encounter_id: int
+    encounter_name: str
+    is_raid: bool
+    metric_filter: str | None
+    total_specs: int
+    completed_specs: int
+    current_spec_slug: str | None
+    status: str
+    started_at: datetime | None
+    finished_at: datetime | None
+    error: str | None
+    created_at: datetime
+
+
+class TopLogsCurrentTierEncounter(BaseModel):
+    encounter_id: int
+    encounter_name: str
+    zone_id: int
+    zone_name: str
+    expansion_id: int
+    expansion_name: str
+
+
+class TopLogsCurrentTierOut(BaseModel):
+    queued: int
+    skipped_already_running: int
+    encounters: list[TopLogsCurrentTierEncounter]

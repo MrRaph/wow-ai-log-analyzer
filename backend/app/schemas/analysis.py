@@ -49,6 +49,10 @@ class AnalysisIn(BaseModel):
     report_id: uuid.UUID
     fight_id: uuid.UUID
     player_id: uuid.UUID
+    # When True, the worker uses the user's own stored AI config instead of
+    # the app-wide one. Mutually exclusive with the app-wide path: if the
+    # admin has set ``ai_provider=disabled``, this MUST be True.
+    use_own_ai: bool = False
 
 
 class AnalysisOut(BaseModel):

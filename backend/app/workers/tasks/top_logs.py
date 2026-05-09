@@ -1,30 +1,117 @@
-"""Background task: refresh top logs for every spec/encounter once a day."""
+"""Background task: weekly top-logs refresh.
+
+Two-phase:
+1. Discover the current retail raid encounters via the WCL ``worldData.zones``
+   API and create a ``TopLogsSeedJob`` for any encounter we don't already
+   have in the cache. Each new job is enqueued via the same ``seed_encounter``
+   worker function the admin UI uses.
+2. Refresh the (spec, encounter, metric) triples already in the cache. This
+   keeps existing data fresh and re-uses the slide-down + incremental detail-
+   fetch logic in ``refresh_top_logs_for_spec_encounter``.
+
+The admin UI reads progress from ``top_logs_seed_jobs`` while step 1's jobs
+are running.
+"""
 from __future__ import annotations
 
 import logging
 
+from arq import ArqRedis
+from arq.connections import RedisSettings, create_pool
 from sqlalchemy import select
 
+from app.config import settings
 from app.db import async_session_factory
-from app.models import GameSpec, TopLog
+from app.models import GameSpec, TopLog, TopLogsSeedJob
 from app.services.top_logs_service import refresh_top_logs_for_spec_encounter
 from app.services.wcl.client import WclClient
+from app.services.wcl_zones_service import fetch_current_raid_encounters
 
 logger = logging.getLogger(__name__)
 
 
-async def refresh_all_top_logs(_ctx: dict) -> int:
-    """Refresh top logs for every (spec, encounter) we already track.
+async def _arq_pool() -> ArqRedis:
+    return await create_pool(
+        RedisSettings(
+            host=settings.redis_host,
+            port=settings.redis_port,
+            database=settings.redis_db,
+        )
+    )
 
-    Strategy: for each known spec, look at all encounter_ids we already have
-    cached entries for, and re-pull them. The first time the worker runs
-    after install there will be no entries — admins seed an encounter once
-    via ``POST /admin/top-logs/refresh``.
+
+async def _seed_missing_current_tier_encounters() -> int:
+    """Phase 1: queue a seed-job for each current-tier encounter we don't
+    already have any cached entries for. Returns the number queued."""
+    raid = await fetch_current_raid_encounters(force_refresh=True)
+    if not raid:
+        return 0
+    queued = 0
+    async with async_session_factory() as session:
+        async with session.begin():
+            cached_encounter_ids = set(
+                (
+                    await session.execute(
+                        select(TopLog.encounter_id).distinct()
+                    )
+                )
+                .scalars()
+                .all()
+            )
+            active_jobs = set(
+                (
+                    await session.execute(
+                        select(TopLogsSeedJob.encounter_id).where(
+                            TopLogsSeedJob.status.in_(("queued", "running")),
+                            TopLogsSeedJob.metric_filter.is_(None),
+                        )
+                    )
+                )
+                .scalars()
+                .all()
+            )
+        new_jobs: list[TopLogsSeedJob] = []
+        async with session.begin():
+            for enc in raid:
+                if enc.encounter_id in cached_encounter_ids:
+                    continue
+                if enc.encounter_id in active_jobs:
+                    continue
+                job = TopLogsSeedJob(
+                    encounter_id=enc.encounter_id,
+                    encounter_name=enc.encounter_name,
+                    is_raid=True,
+                    metric_filter=None,
+                    total_specs=0,
+                    status="queued",
+                )
+                session.add(job)
+                new_jobs.append(job)
+        if new_jobs:
+            arq = await _arq_pool()
+            try:
+                for job in new_jobs:
+                    await session.refresh(job)
+                    await arq.enqueue_job("seed_encounter_task", str(job.id))
+                    queued += 1
+            finally:
+                await arq.close()
+    return queued
+
+
+async def refresh_all_top_logs(_ctx: dict) -> int:
+    """Top-logs weekly refresh.
+
+    Step 1: discover current-tier encounters and queue seed-jobs for the
+    new ones (the worker fans out to every spec). Step 2: re-pull the
+    (spec, encounter, metric) triples already in the cache so existing
+    rankings stay current as players post fresh logs.
     """
+    seeded_new = await _seed_missing_current_tier_encounters()
+    logger.info("weekly top-logs: queued %d new current-tier seed jobs", seeded_new)
+
     refreshed = 0
     async with WclClient() as wcl, async_session_factory() as session:
-        # Snapshot current state inside one short transaction so the per-spec
-        # update transactions below don't fight the autobegin.
         async with session.begin():
             specs = list(
                 (await session.execute(select(GameSpec))).scalars().all()
@@ -60,5 +147,9 @@ async def refresh_all_top_logs(_ctx: dict) -> int:
                     encounter_id,
                     metric,
                 )
-    logger.info("top-logs refresh complete (%s rows)", refreshed)
+    logger.info(
+        "weekly top-logs refresh complete (%s rows refreshed, %s new seed jobs queued)",
+        refreshed,
+        seeded_new,
+    )
     return refreshed
