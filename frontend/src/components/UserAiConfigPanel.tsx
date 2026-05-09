@@ -15,10 +15,12 @@ import type {
 } from "@/types/api";
 
 // Default model name presets per provider — picked from the most common
-// public choices so the user has something working out of the box.
+// public choices so the user has something working out of the box. The
+// input is free-text so users can override with whatever model id their
+// provider supports (e.g. ``gpt-5.4-nano``, ``o3-mini``, …).
 const DEFAULT_MODELS: Record<AiProviderType, string> = {
   anthropic: "claude-sonnet-4-6",
-  openai: "gpt-4o",
+  openai: "gpt-5.4-mini",
   openai_compatible: "",
 };
 

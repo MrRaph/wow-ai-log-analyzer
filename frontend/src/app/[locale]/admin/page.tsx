@@ -165,9 +165,13 @@ function AdminView({ locale, currentUserId }: { locale: Locale; currentUserId: s
                 )}
                 {provider === "openai" && (
                   <>
-                    <option value="gpt-4o">gpt-4o</option>
-                    <option value="gpt-4o-mini">gpt-4o-mini</option>
-                    <option value="o1-preview">o1-preview</option>
+                    <option value="gpt-5.4">gpt-5.4 (reasoning, flagship)</option>
+                    <option value="gpt-5.4-mini">gpt-5.4-mini (reasoning, recommended)</option>
+                    <option value="gpt-5.4-nano">gpt-5.4-nano (reasoning, cheapest)</option>
+                    <option value="gpt-5">gpt-5 (legacy reasoning)</option>
+                    <option value="gpt-5-mini">gpt-5-mini (legacy reasoning)</option>
+                    <option value="gpt-4o">gpt-4o (no reasoning)</option>
+                    <option value="gpt-4o-mini">gpt-4o-mini (no reasoning, cheapest)</option>
                   </>
                 )}
               </Select>

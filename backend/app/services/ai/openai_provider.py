@@ -87,6 +87,19 @@ class OpenAiCompatibleProvider:
             "chat_template_kwargs": {"enable_thinking": thinking_enabled},
         }
 
+        # OpenAI deprecated ``max_tokens`` in favour of
+        # ``max_completion_tokens`` for GPT-5+ and o1+ models — those
+        # API endpoints REJECT ``max_tokens`` outright with a 400.
+        # Older OpenAI models (gpt-4o family) accept the new name as
+        # well, so we use it unconditionally for cloud mode. Local
+        # mode (llama.cpp's OpenAI shim) only knows ``max_tokens``,
+        # so we keep that there.
+        token_kwargs: dict[str, int] = (
+            {"max_completion_tokens": max_t}
+            if self._mode == "openai"
+            else {"max_tokens": max_t}
+        )
+
         try:
             resp = await self._client.chat.completions.create(
                 model=chosen,
@@ -94,7 +107,7 @@ class OpenAiCompatibleProvider:
                     {"role": "system", "content": system_prompt},
                     {"role": "user", "content": user_prompt},
                 ],
-                max_tokens=max_t,
+                **token_kwargs,
                 temperature=temperature,
                 extra_body=extra_body,
             )
