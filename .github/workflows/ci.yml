@@ -1,0 +1,153 @@
+name: CI
+
+# Runs on every PR (tests only) and on every push to main / master
+# (tests, then publish the backend image to ghcr.io).
+#
+# Frontend image is NOT pushed: per-deployment values (imprint,
+# Turnstile site key, default locale) are read at runtime, not baked
+# into the bundle, so building locally on the prod server is one
+# quick step. local-ai is also not pushed (huge upstream base + thin
+# code change). Both decisions are documented in docs/SETUP.md §12.
+
+on:
+  push:
+    branches: [main, master]
+  pull_request:
+    branches: [main, master]
+
+# Cancel an in-flight run when a new commit comes in on the same branch
+# / PR — saves Actions minutes on rapid pushes.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  REGISTRY: ghcr.io
+  # ghcr.io requires lowercase image names; ${{ github.repository_owner }}
+  # preserves case, so we lowercase it via the env at job time.
+  BACKEND_IMAGE_NAME: wow-ai-log-analyzer-backend
+
+jobs:
+  backend-tests:
+    name: Backend (pytest)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v3
+        with:
+          version: latest
+          enable-cache: true
+          cache-dependency-glob: backend/uv.lock
+
+      - name: Sync dependencies
+        working-directory: backend
+        # ``--frozen`` requires backend/uv.lock to be committed (which
+        # it is); CI fails loudly if the lock and pyproject diverge.
+        run: uv sync --frozen
+
+      - name: Run pytest
+        working-directory: backend
+        # Tests use SQLite in-memory + ASGITransport, no DB/Redis
+        # service containers needed.
+        run: uv run pytest -q
+
+  frontend-checks:
+    name: Frontend (typecheck + lint)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install dependencies
+        working-directory: frontend
+        # ``npm ci`` requires package-lock.json (recommended for
+        # reproducibility). Falls back to ``npm install`` for the very
+        # first push before a lock has been committed.
+        run: |
+          if [ -f package-lock.json ]; then
+            npm ci
+          else
+            echo "::warning::package-lock.json not committed — using npm install. Run 'npm install' locally and commit the lockfile for reproducible builds."
+            npm install --no-audit --no-fund
+          fi
+
+      - name: TypeScript
+        working-directory: frontend
+        run: npm run typecheck
+
+      - name: ESLint
+        working-directory: frontend
+        run: npm run lint
+
+  compose-validate:
+    name: docker-compose syntax
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Validate compose file
+        # ``docker compose config`` substitutes env vars; we provide
+        # the example values so required-ish placeholders don't fail
+        # the parse step.
+        run: |
+          cp .env.example .env
+          docker compose config --quiet
+
+  build-and-push:
+    name: Build + push backend → ghcr.io
+    needs: [backend-tests, frontend-checks, compose-validate]
+    if: >-
+      github.event_name == 'push' &&
+      (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Lowercase repository owner
+        # ghcr.io insists on lowercase namespaces; tag construction
+        # below would 400 on ``GHCR/Mixed-Case`` users otherwise.
+        id: lowercase
+        run: |
+          echo "owner=$(echo '${{ github.repository_owner }}' | tr '[:upper:]' '[:lower:]')" >> "$GITHUB_OUTPUT"
+
+      - name: Log in to ghcr.io
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Compute image tags
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.REGISTRY }}/${{ steps.lowercase.outputs.owner }}/${{ env.BACKEND_IMAGE_NAME }}
+          tags: |
+            type=raw,value=latest
+            type=sha,prefix=sha-
+
+      - name: Build & push backend
+        uses: docker/build-push-action@v5
+        with:
+          context: ./backend
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          # GitHub Actions cache: writes layers to the repo's Actions
+          # cache (10 GB total quota). Inline cache makes the next
+          # build incremental without an external storage backend.
+          cache-from: type=gha
+          cache-to: type=gha,mode=max

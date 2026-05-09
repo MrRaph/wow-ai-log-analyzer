@@ -1,7 +1,17 @@
 export const LOCALES = ["en", "de"] as const;
 export type Locale = (typeof LOCALES)[number];
-export const DEFAULT_LOCALE: Locale =
-  (process.env.NEXT_PUBLIC_DEFAULT_LOCALE as Locale | undefined) ?? "en";
+
+/** Reads ``process.env.DEFAULT_LOCALE`` AT CALL TIME so the standalone
+ * server picks up the runtime value. A top-level ``const`` would be
+ * evaluated when the module is first imported (during ``next build``),
+ * baking whatever was set then — typically nothing. Always call this
+ * function from server-side code (middleware, i18n/request) instead of
+ * importing a constant.
+ */
+export function getDefaultLocale(): Locale {
+  const raw = process.env.DEFAULT_LOCALE;
+  return isLocale(raw) ? raw : "en";
+}
 
 export function isLocale(value: string | undefined | null): value is Locale {
   return !!value && (LOCALES as readonly string[]).includes(value);

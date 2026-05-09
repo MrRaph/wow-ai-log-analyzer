@@ -23,9 +23,12 @@ export interface TokenPair {
 export interface PublicConfig {
   app_name: string;
   supported_locales: string[];
+  default_locale: string;
   allow_registration: boolean;
   ai_enabled: boolean;
   captcha_enabled: boolean;
+  /** Cloudflare site key. Empty string ⇒ widget disabled. */
+  turnstile_site_key: string;
 }
 
 export type AiProviderType = "anthropic" | "openai" | "openai_compatible";

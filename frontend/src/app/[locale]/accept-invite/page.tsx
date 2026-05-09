@@ -6,7 +6,7 @@ import { useTranslations } from "next-intl";
 import { Suspense, use, useState } from "react";
 
 import { AuthShell } from "@/components/AuthShell";
-import { TurnstileWidget, isTurnstileEnabled } from "@/components/TurnstileWidget";
+import { TurnstileWidget, useTurnstileEnabled } from "@/components/TurnstileWidget";
 import { Button, Card, FieldError, Input, Label } from "@/components/ui";
 import { ApiClientError, apiFetch } from "@/lib/api";
 import type { Locale } from "@/i18n/config";
@@ -30,6 +30,7 @@ function AcceptInvitePageInner({ params }: { params: Promise<{ locale: Locale }>
   const [captchaToken, setCaptchaToken] = useState<string | null>(null);
   const [err, setErr] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
+  const captchaRequired = useTurnstileEnabled();
 
   async function onSubmit(e: React.FormEvent) {
     e.preventDefault();
@@ -38,7 +39,7 @@ function AcceptInvitePageInner({ params }: { params: Promise<{ locale: Locale }>
       setErr(t("auth.passwordsTooShort"));
       return;
     }
-    if (isTurnstileEnabled && !captchaToken) {
+    if (captchaRequired === true && !captchaToken) {
       setErr(t("auth.captchaMissing"));
       return;
     }

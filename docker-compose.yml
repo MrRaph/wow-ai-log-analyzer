@@ -34,6 +34,11 @@ services:
       - "6379"
 
   backend:
+    # `image:` first, then `build:` — when CI publishes the image to ghcr
+    # users can pull it as-is; locally `docker compose up --build` still
+    # rebuilds and tags as ``image:`` so worker can ``image:`` reference
+    # the same artifact.
+    image: ${BACKEND_IMAGE:-wow-ai-log-analyzer-backend:latest}
     build:
       context: ./backend
       dockerfile: Dockerfile
@@ -47,11 +52,18 @@ services:
         condition: service_healthy
       redis:
         condition: service_healthy
-    # Optional Docker socket mount for the admin "System" card
-    # (ADMIN_DOCKER_CONTROL=true). Equivalent to root on the host —
-    # only enable on single-tenant self-hosted instances. The mount
-    # itself is harmless when ADMIN_DOCKER_CONTROL=false (the service
-    # never reads the socket).
+    # ┌─────────────────────────────────────────────────────────────┐
+    # │ OPTIONAL: Docker-socket mount for the admin "System" card.  │
+    # │ Powers ADMIN_DOCKER_CONTROL=true so admins can start/stop/  │
+    # │ restart the compose stack from the UI and the local-ai     │
+    # │ container is auto-toggled with the AI-provider drop-down.   │
+    # │                                                             │
+    # │ SECURITY: this mount is equivalent to root on the host.     │
+    # │ ANY code-execution bug in the backend gives an attacker     │
+    # │ root over the entire machine. If you don't need the feature │
+    # │ — set ADMIN_DOCKER_CONTROL=false in .env AND comment the    │
+    # │ two lines below out for full belt-and-braces.               │
+    # └─────────────────────────────────────────────────────────────┘
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
     ports:
@@ -65,9 +77,9 @@ services:
       retries: 10
 
   worker:
-    build:
-      context: ./backend
-      dockerfile: Dockerfile
+    # Reuse the backend image (same code, different command). Avoids a
+    # second build job in CI and a duplicate ~250 MB layer set on disk.
+    image: ${BACKEND_IMAGE:-wow-ai-log-analyzer-backend:latest}
     restart: unless-stopped
     env_file: .env
     environment:
@@ -79,25 +91,27 @@ services:
         condition: service_healthy
       redis:
         condition: service_healthy
+      backend:
+        condition: service_started
 
   frontend:
+    # No build args needed — the image is deployment-agnostic and reads
+    # all per-host config (imprint, default locale, Turnstile site key)
+    # at runtime via process.env (server components) or the public
+    # /api/v1/config endpoint (client). API base URL is relative, so
+    # the reverse proxy out front routes /api/* → backend, /* → here.
     build:
       context: ./frontend
       dockerfile: Dockerfile
-      args:
-        NEXT_PUBLIC_API_BASE_URL: ${NEXT_PUBLIC_API_BASE_URL}
-        NEXT_PUBLIC_DEFAULT_LOCALE: ${NEXT_PUBLIC_DEFAULT_LOCALE:-en}
-        NEXT_PUBLIC_IMPRINT_NAME: ${NEXT_PUBLIC_IMPRINT_NAME:-}
-        NEXT_PUBLIC_IMPRINT_STREET: ${NEXT_PUBLIC_IMPRINT_STREET:-}
-        NEXT_PUBLIC_IMPRINT_POSTAL_CITY: ${NEXT_PUBLIC_IMPRINT_POSTAL_CITY:-}
-        NEXT_PUBLIC_IMPRINT_COUNTRY: ${NEXT_PUBLIC_IMPRINT_COUNTRY:-Deutschland}
-        NEXT_PUBLIC_IMPRINT_EMAIL: ${NEXT_PUBLIC_IMPRINT_EMAIL:-}
-        NEXT_PUBLIC_IMPRINT_PHONE: ${NEXT_PUBLIC_IMPRINT_PHONE:-}
-        NEXT_PUBLIC_TURNSTILE_SITE_KEY: ${NEXT_PUBLIC_TURNSTILE_SITE_KEY:-}
     restart: unless-stopped
     env_file: .env
     environment:
       NODE_ENV: production
+      # Internal target for the Next.js /api/:path* rewrite. Used when
+      # there's no reverse proxy in front (e.g. hitting localhost:3000
+      # directly). With a proxy in front, /api/* is intercepted before
+      # reaching this container and this var is unused.
+      BACKEND_URL: http://backend:8000
     depends_on:
       - backend
     ports:
@@ -152,8 +166,13 @@ services:
       # The supervisor responds on :8081 even while the model is still
       # downloading or the child is stopped — that's the right liveness
       # signal here. /v1/models on :8080 only goes 200 once a model is
-      # loaded, which can be 10-40 min after first boot.
-      test: ["CMD-SHELL", "exec 3<>/dev/tcp/127.0.0.1/8081 && echo -e 'GET /healthz HTTP/1.1\\r\\nHost: x\\r\\n\\r\\n' >&3 && head -1 <&3 | grep -q '200'"]
+      # loaded into VRAM, which can be 10-40 min after first boot, so
+      # we'd otherwise see the container stuck "unhealthy" for the
+      # whole load. The LocalAiCard shows actual inference readiness.
+      #
+      # Note: must use curl rather than the bash /dev/tcp/ idiom because
+      # the upstream image's /bin/sh is dash, which doesn't support it.
+      test: ["CMD", "curl", "-fsS", "http://127.0.0.1:8081/healthz"]
       interval: 30s
       timeout: 10s
       retries: 5

@@ -58,6 +58,34 @@ def _client() -> Any:
         ) from exc
 
 
+def _resolve_image_label(c: Any, attrs: dict) -> str:
+    """Best-effort human-readable image name for the System card.
+
+    ``c.image`` is a lazy-loaded property — accessing it does an
+    ``/images/<sha>/json`` lookup on the Docker daemon. If the image
+    was pruned out from under a still-running container (e.g. after
+    ``docker builder prune`` removed the manifest), that lookup
+    raises ``ImageNotFound`` and would take down the whole list.
+
+    We swallow that and fall back to the image identifier the daemon
+    remembers on the container record — the original tag string from
+    when the container was created (e.g. ``redis:7-alpine``) or, if
+    that's been replaced too, the bare SHA.
+    """
+    fallback = (
+        (attrs.get("Config") or {}).get("Image")
+        or attrs.get("Image", "")
+        or "<unknown>"
+    )
+    try:
+        img = c.image
+    except Exception:  # noqa: BLE001 — docker.errors.ImageNotFound + others
+        return fallback
+    if img and getattr(img, "tags", None):
+        return img.tags[0]
+    return fallback
+
+
 def _container_to_info(c: Any) -> ContainerInfo:
     attrs = c.attrs or {}
     state = attrs.get("State") or {}
@@ -68,7 +96,7 @@ def _container_to_info(c: Any) -> ContainerInfo:
     return ContainerInfo(
         name=c.name,
         service=service,
-        image=(c.image.tags[0] if c.image and c.image.tags else attrs.get("Image", "")),
+        image=_resolve_image_label(c, attrs),
         status=state.get("Status") or "unknown",
         health=health_raw,
         started_at=state.get("StartedAt"),

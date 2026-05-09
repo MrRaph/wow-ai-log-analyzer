@@ -23,6 +23,7 @@ import logging
 import os
 import shutil
 import signal
+import stat
 import subprocess
 import threading
 import time
@@ -162,6 +163,44 @@ def _gguf_path(filename: str) -> Path:
     return CACHE_DIR / filename
 
 
+def _is_real_file(p: Path) -> bool:
+    """True iff ``p`` is a regular non-empty file (not a symlink, not broken).
+
+    ``Path.exists()`` follows symlinks, so it returns False for a broken
+    symlink — but the symlink still occupies the path and trips up later
+    code that does ``unlink()`` / ``stat()``. We need a stricter check.
+    """
+    try:
+        st = p.lstat()  # lstat does NOT follow symlinks
+    except FileNotFoundError:
+        return False
+    if not stat.S_ISREG(st.st_mode):
+        return False
+    return st.st_size > 0
+
+
+def _purge_broken_symlinks(directory: Path) -> int:
+    """Remove dangling symlinks under ``directory`` (non-recursive).
+
+    Called from ``lifespan`` so a previous run's failed link/copy step
+    can't poison the next boot — the supervisor would otherwise loop
+    forever between "redownload" and "[Errno 2]" because every retry
+    sees the broken symlink and treats it as occupied.
+    """
+    removed = 0
+    if not directory.exists():
+        return 0
+    for p in directory.iterdir():
+        if p.is_symlink() and not p.exists():
+            try:
+                p.unlink()
+                removed += 1
+                logger.warning("removed broken symlink %s", p)
+            except OSError:
+                logger.exception("could not remove broken symlink %s", p)
+    return removed
+
+
 def _download_with_progress(state: State, cfg: ModelConfig) -> Path:
     """Synchronously download a GGUF, updating ``state.download`` as we go.
 
@@ -170,17 +209,23 @@ def _download_with_progress(state: State, cfg: ModelConfig) -> Path:
       - resumes partial downloads,
       - verifies SHA256,
       - dedupes identical files via content-addressable storage.
+
+    The HF cache stores blobs at ``/cache/.hf/.../blobs/<sha>`` and
+    surfaces them via *relative* symlinks in the snapshot directory.
+    Those symlinks resolve correctly only from within the snapshot
+    folder — naively copying them out (e.g. via ``os.link`` on the
+    snapshot path) creates a dangling symlink from ``/cache/<file>.gguf``
+    to the non-existent ``/blobs/<sha>``. We avoid that by always
+    resolving ``cached`` to its actual blob path before linking.
     """
     target = _gguf_path(cfg.hf_file)
-    if target.exists() and target.stat().st_size > 0:
-        # Already downloaded — fast path.
+    if _is_real_file(target):
         logger.info("Model %s already cached at %s", cfg.hf_file, target)
         return target
 
     api = HfApi()
     bytes_total: int | None = None
     try:
-        # Probe the repo for the file's size so the UI has a denominator.
         info = api.repo_info(cfg.hf_repo, files_metadata=True)
         for f in info.siblings or []:
             if f.rfilename == cfg.hf_file:
@@ -192,20 +237,17 @@ def _download_with_progress(state: State, cfg: ModelConfig) -> Path:
     state.download = DownloadProgress(filename=cfg.hf_file, bytes_total=bytes_total)
     logger.info("Downloading %s/%s (~%s bytes)", cfg.hf_repo, cfg.hf_file, bytes_total)
 
-    # huggingface_hub uses tqdm internally; the cleanest way to track
-    # progress without monkey-patching is to download to the HF cache
-    # then copy/symlink, while a poller thread watches the partial file
-    # size on disk. The HF cache resolver returns the final file path.
     download_done = threading.Event()
 
     def _poll_progress(target_dir: Path) -> None:
         """Watch the cache directory for any *.incomplete file growing."""
         while not download_done.is_set():
             try:
-                # huggingface_hub places partial downloads as
-                # <name>.incomplete in its blob cache.
                 for p in target_dir.rglob("*.incomplete"):
-                    sz = p.stat().st_size
+                    try:
+                        sz = p.stat().st_size
+                    except FileNotFoundError:
+                        continue
                     if state.download:
                         state.download.bytes_done = sz
             except FileNotFoundError:
@@ -229,22 +271,41 @@ def _download_with_progress(state: State, cfg: ModelConfig) -> Path:
     finally:
         download_done.set()
 
-    # Materialise a flat /cache/<filename> path so the model list (and
-    # llama-server) doesn't have to traverse HF's blob layout. We
-    # hard-link if possible (same filesystem) to avoid doubling disk
-    # use, falling back to copy.
-    target.parent.mkdir(parents=True, exist_ok=True)
+    # Resolve the snapshot symlink to the real blob path before linking
+    # — otherwise the relative link target ``../../blobs/<sha>`` would
+    # be interpreted from /cache/'s perspective and break.
     try:
-        if target.exists():
+        resolved = Path(cached).resolve(strict=True)
+    except FileNotFoundError as exc:
+        raise RuntimeError(
+            f"hf_hub_download returned a path that doesn't resolve: {cached}"
+        ) from exc
+
+    # Clean up *any* prior occupant — regular file, working symlink or
+    # the dangling-symlink failure mode that motivated this fix.
+    target.parent.mkdir(parents=True, exist_ok=True)
+    if target.is_symlink() or target.exists():
+        try:
             target.unlink()
-        os.link(cached, target)
+        except FileNotFoundError:
+            pass
+
+    try:
+        os.link(resolved, target)
     except OSError:
-        shutil.copyfile(cached, target)
+        # Cross-device or filesystem doesn't allow hardlinks → fall back
+        # to a real copy. Either way the result is a regular file at
+        # ``target`` (no symlink), so list_models / llama-server can
+        # treat it as a normal path.
+        shutil.copyfile(resolved, target)
 
     if state.download:
-        state.download.bytes_done = target.stat().st_size
-        if state.download.bytes_total is None:
-            state.download.bytes_total = state.download.bytes_done
+        try:
+            state.download.bytes_done = target.stat().st_size
+            if state.download.bytes_total is None:
+                state.download.bytes_total = state.download.bytes_done
+        except FileNotFoundError:
+            state.download.error = "file vanished after download"
         state.download.finished_at = time.time()
     logger.info("Download complete: %s", target)
     return target
@@ -424,6 +485,12 @@ STATE = load_state()
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    # Defensive cleanup: previous runs may have left dangling symlinks
+    # at /cache/<file>.gguf when an apply failed mid-link. Those would
+    # crash list_models and confuse the apply loop into infinite
+    # "redownload" attempts. Sweep them on every boot.
+    _purge_broken_symlinks(CACHE_DIR)
+
     if STATE.desired_running and STATE.config:
         # Boot the child in the background so /healthz responds quickly
         # even when the model still has to download.
@@ -513,10 +580,18 @@ def list_models() -> list[ModelFileOut]:
     out: list[ModelFileOut] = []
     loaded = STATE.proc_model_path
     for p in sorted(CACHE_DIR.glob("*.gguf")):
+        # Skip any dangling symlinks left behind by a prior failed
+        # download — those would crash p.stat() with ENOENT and 500
+        # the whole list endpoint.
+        try:
+            size = p.stat().st_size
+        except FileNotFoundError:
+            logger.warning("skipping broken model entry: %s", p)
+            continue
         out.append(
             ModelFileOut(
                 filename=p.name,
-                size_bytes=p.stat().st_size,
+                size_bytes=size,
                 is_loaded=(loaded is not None and p == loaded),
             )
         )

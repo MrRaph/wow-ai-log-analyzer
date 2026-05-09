@@ -5,7 +5,7 @@ import { useTranslations } from "next-intl";
 import { use, useState } from "react";
 
 import { AuthShell } from "@/components/AuthShell";
-import { TurnstileWidget, isTurnstileEnabled } from "@/components/TurnstileWidget";
+import { TurnstileWidget, useTurnstileEnabled } from "@/components/TurnstileWidget";
 import { Button, Card, FieldError, Input, Label } from "@/components/ui";
 import { ApiClientError, apiFetch } from "@/lib/api";
 import type { Locale } from "@/i18n/config";
@@ -18,10 +18,11 @@ export default function ForgotPasswordPage({ params }: { params: Promise<{ local
   const [done, setDone] = useState(false);
   const [err, setErr] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
+  const captchaRequired = useTurnstileEnabled();
 
   async function onSubmit(e: React.FormEvent) {
     e.preventDefault();
-    if (isTurnstileEnabled && !captchaToken) {
+    if (captchaRequired === true && !captchaToken) {
       setErr(t("auth.captchaMissing"));
       return;
     }

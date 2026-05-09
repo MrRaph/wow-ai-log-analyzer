@@ -43,6 +43,20 @@ async def create_analysis(
     Returns 202 with ``status="pending"``. The frontend polls
     ``GET /analyses/{id}`` until ``status`` is ``succeeded`` or ``failed``.
     """
+    # AuthZ: requester must own the target report (admins can analyse any).
+    # Without this an attacker who guesses report IDs could exfiltrate the
+    # AI's findings about other users' raids since requested_by_id is set
+    # to the caller — they'd then be allowed to read the result.
+    target_report = (
+        await session.execute(
+            select(Report.owner_user_id).where(Report.id == payload.report_id)
+        )
+    ).scalar_one_or_none()
+    if target_report is None:
+        raise NotFoundError("Report not found.")
+    if target_report != user.id and user.role != UserRole.admin:
+        raise NotFoundError("Report not found.")
+
     if payload.use_own_ai:
         # User wants the BYOK path — they must have a config saved.
         from app.services.user_ai_service import get_config as _get_user_ai_cfg
@@ -260,11 +274,17 @@ async def list_my_analyses(
 
 
 @router.get("/{analysis_id}", response_model=AnalysisOut)
-async def get_analysis(analysis_id: uuid.UUID, session: SessionDep, _: CurrentUser) -> AnalysisOut:
+async def get_analysis(
+    analysis_id: uuid.UUID, session: SessionDep, user: CurrentUser
+) -> AnalysisOut:
     row = (
         await session.execute(select(Analysis).where(Analysis.id == analysis_id))
     ).scalar_one_or_none()
     if not row:
+        raise NotFoundError("Analysis not found.")
+    # Owner-or-admin gate. 404 (not 403) so we don't leak existence of an
+    # analysis the caller is not authorised to see.
+    if row.requested_by_id != user.id and user.role != UserRole.admin:
         raise NotFoundError("Analysis not found.")
     return AnalysisOut.model_validate(row)
 

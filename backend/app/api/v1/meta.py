@@ -1,6 +1,8 @@
 """Meta endpoints: health check, public app config, classes/specs reference."""
 from __future__ import annotations
 
+import os
+
 from fastapi import APIRouter
 from sqlalchemy import select
 
@@ -18,7 +20,14 @@ async def health() -> dict[str, str]:
 
 @router.get("/config")
 async def public_config(session: SessionDep) -> dict[str, object]:
-    """Configuration the frontend needs *before* a user is logged in."""
+    """Configuration the frontend needs *before* a user is logged in.
+
+    Everything in here is delivered at request time so the frontend image
+    can be built once (no per-deployment NEXT_PUBLIC_* baking) and the
+    same artifact runs on any host. Values that depend on per-instance
+    env vars (Turnstile site key, Imprint, default locale) are read here
+    rather than embedded in the JS bundle.
+    """
     rows = (await session.execute(select(AppSetting))).scalars().all()
     cfg = {row.key: row.value for row in rows}
     allow_reg_value = cfg.get("allow_registration") or {}
@@ -27,11 +36,15 @@ async def public_config(session: SessionDep) -> dict[str, object]:
     return {
         "app_name": settings.app_name,
         "supported_locales": ["en", "de"],
+        "default_locale": (os.environ.get("DEFAULT_LOCALE") or "en").lower(),
         "allow_registration": bool(allow_reg_value.get("enabled", settings.allow_registration)),
         # ``ai_enabled = false`` → admin set ``ai_provider=disabled``.
         # Frontend uses this to grey out the "Analyze with app AI" button.
         "ai_enabled": active_ai != "disabled",
         "captcha_enabled": settings.turnstile_enabled,
+        # Empty string → frontend renders no widget. Site key is public
+        # (used by browsers to load the challenge), so safe to expose.
+        "turnstile_site_key": os.environ.get("TURNSTILE_SITE_KEY", "") or "",
     }
 
 

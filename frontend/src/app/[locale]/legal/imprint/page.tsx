@@ -3,8 +3,12 @@ import { getTranslations, setRequestLocale } from "next-intl/server";
 import { Card } from "@/components/ui";
 import type { Locale } from "@/i18n/config";
 
-// Pull imprint fields from build-time env (NEXT_PUBLIC_*). Empty string =>
-// render a placeholder so the missing field is visible at a glance.
+// Pull imprint fields from RUNTIME env. ``force-dynamic`` keeps Next.js
+// from pre-rendering the page at build time (which would freeze the
+// build-time env values into the static HTML) — every request now
+// reads ``process.env.IMPRINT_*`` afresh from the container's env.
+export const dynamic = "force-dynamic";
+
 function envOrPlaceholder(value: string | undefined, placeholder: string): string {
   const v = (value ?? "").trim();
   return v.length > 0 ? v : `[${placeholder}]`;
@@ -20,26 +24,26 @@ export default async function ImprintPage({
   const t = await getTranslations();
 
   const name = envOrPlaceholder(
-    process.env.NEXT_PUBLIC_IMPRINT_NAME,
+    process.env.IMPRINT_NAME,
     t("legal.imprintFields.name"),
   );
   const street = envOrPlaceholder(
-    process.env.NEXT_PUBLIC_IMPRINT_STREET,
+    process.env.IMPRINT_STREET,
     t("legal.imprintFields.street"),
   );
   const postalCity = envOrPlaceholder(
-    process.env.NEXT_PUBLIC_IMPRINT_POSTAL_CITY,
+    process.env.IMPRINT_POSTAL_CITY,
     t("legal.imprintFields.postalCity"),
   );
   const country = envOrPlaceholder(
-    process.env.NEXT_PUBLIC_IMPRINT_COUNTRY,
+    process.env.IMPRINT_COUNTRY,
     t("legal.imprintFields.country"),
   );
   const email = envOrPlaceholder(
-    process.env.NEXT_PUBLIC_IMPRINT_EMAIL,
+    process.env.IMPRINT_EMAIL,
     t("legal.imprintFields.email"),
   );
-  const phoneRaw = (process.env.NEXT_PUBLIC_IMPRINT_PHONE ?? "").trim();
+  const phoneRaw = (process.env.IMPRINT_PHONE ?? "").trim();
 
   return (
     <div className="container-page max-w-3xl">

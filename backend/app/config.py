@@ -139,9 +139,10 @@ class Settings(BaseSettings):
     # --- Captcha (Cloudflare Turnstile, optional) ---
     # Enable Turnstile checks on login, register, forgot-password and accept-
     # invite endpoints. When False the backend skips verification entirely; the
-    # frontend reads the same flag from PublicConfig and skips rendering the
-    # widget. When True, ``turnstile_site_key`` must be set on the frontend
-    # (NEXT_PUBLIC_TURNSTILE_SITE_KEY) and ``turnstile_secret_key`` here.
+    # frontend reads the flag from /api/v1/config and skips rendering the
+    # widget. When True, set both ``TURNSTILE_SECRET_KEY`` (here, kept on
+    # the server) and ``TURNSTILE_SITE_KEY`` (delivered to the browser via
+    # the same /api/v1/config endpoint).
     turnstile_enabled: bool = False
     turnstile_secret_key: str = ""
 
@@ -184,3 +185,42 @@ def get_settings() -> Settings:
 
 
 settings = get_settings()
+
+
+# Well-known weak defaults shipped with .env.example. Boot-time guard refuses
+# to start the production app if any of these slipped through into the
+# active settings — preserving them as defaults keeps dev/test ergonomics
+# (uv run / pytest without .env) but catches a "forgot to fill .env" boot
+# in production where the consequences are JWT-forging + Fernet-decryption.
+_INSECURE_DEFAULTS = {
+    "secret_key": {"insecure-dev-key"},
+    "postgres_password": {"change-me"},
+    "initial_admin_password": {"changeme-at-first-login"},
+}
+
+
+def assert_production_secrets() -> None:
+    """Raise RuntimeError when the active settings still hold any of the
+    well-known weak defaults from ``.env.example`` and ``app_env`` is
+    ``production``. Called from the FastAPI lifespan so misconfigured
+    deployments fail loudly at boot rather than silently accepting JWTs
+    signed with the public-on-GitHub default key.
+    """
+    if settings.app_env != "production":
+        return
+    bad: list[str] = []
+    for field, weak in _INSECURE_DEFAULTS.items():
+        if getattr(settings, field) in weak:
+            bad.append(field.upper())
+    # Also catch the case where someone copies the example value but only
+    # the prefix matched a long random string — accept anything ≥32 chars
+    # for SECRET_KEY (HS256 + Fernet derivation both want >=128 bit entropy).
+    if len(settings.secret_key) < 32:
+        bad.append("SECRET_KEY (must be >=32 chars; generate with `openssl rand -hex 64`)")
+    if bad:
+        raise RuntimeError(
+            "Refusing to boot in production with insecure default values for: "
+            + ", ".join(bad)
+            + ". Set strong values in .env (or set APP_ENV=development for "
+            "local testing)."
+        )

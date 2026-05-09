@@ -2,7 +2,14 @@
 import type { ApiError, TokenPair } from "@/types/api";
 import { clearAuth, getAccessToken, getRefreshToken, setTokens } from "./auth";
 
-const API_BASE = process.env.NEXT_PUBLIC_API_BASE_URL ?? "http://localhost:8000";
+// Same-origin: the reverse proxy in front (Caddy/nginx/Traefik) routes
+// /api/* to the FastAPI backend and /* to this Next.js frontend. For
+// local `npm run dev` outside compose, ``next.config.ts`` defines a
+// rewrite that proxies /api to http://localhost:8000.
+//
+// Avoids baking a deployment-specific URL into the JS bundle, which
+// previously meant rebuilding the frontend image for every host.
+const API_BASE = "";
 
 export class ApiClientError extends Error {
   constructor(

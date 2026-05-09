@@ -128,6 +128,13 @@ async def delete_report(
     await session.commit()
 
 
+def _assert_report_visible(report: Report, user) -> None:
+    """Owner-or-admin gate. Raises NotFoundError (not Forbidden) on mismatch
+    so we don't leak whether a given report id/code exists at all."""
+    if report.owner_user_id != user.id and user.role != UserRole.admin:
+        raise NotFoundError("Report not found.")
+
+
 @router.get("/{report_id}", response_model=ReportOut)
 async def get_report(
     report_id: uuid.UUID, session: SessionDep, user: CurrentUser, locale: LocaleDep
@@ -147,6 +154,7 @@ async def get_report(
     report = (await session.execute(stmt)).scalar_one_or_none()
     if not report:
         raise NotFoundError("Report not found.")
+    _assert_report_visible(report, user)
     name_map = await _localize_fight_names(session, report, user.locale or locale)
     return _serialize_report(report, name_map)
 
@@ -156,5 +164,6 @@ async def get_report_by_code(
     code: str, session: SessionDep, user: CurrentUser, locale: LocaleDep
 ) -> ReportOut:
     report = await report_service.get_report(session, code=code)
+    _assert_report_visible(report, user)
     name_map = await _localize_fight_names(session, report, user.locale or locale)
     return _serialize_report(report, name_map)

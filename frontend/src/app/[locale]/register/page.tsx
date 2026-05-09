@@ -7,7 +7,7 @@ import { useTranslations } from "next-intl";
 import { Suspense, use, useEffect, useState } from "react";
 
 import { AuthShell } from "@/components/AuthShell";
-import { TurnstileWidget, isTurnstileEnabled } from "@/components/TurnstileWidget";
+import { TurnstileWidget, useTurnstileEnabled } from "@/components/TurnstileWidget";
 import { Button, Card, FieldError, Input, Label } from "@/components/ui";
 import { ApiClientError, apiFetch } from "@/lib/api";
 import { setTokens } from "@/lib/auth";
@@ -35,6 +35,7 @@ function RegisterPageInner({ params }: { params: Promise<{ locale: Locale }> }) 
   const [err, setErr] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [allowOpenReg, setAllowOpenReg] = useState<boolean | null>(null);
+  const captchaRequired = useTurnstileEnabled();
 
   useEffect(() => {
     apiFetch<PublicConfig>("/api/v1/config", { anonymous: true })
@@ -49,7 +50,7 @@ function RegisterPageInner({ params }: { params: Promise<{ locale: Locale }> }) 
       setErr(t("auth.passwordsTooShort"));
       return;
     }
-    if (isTurnstileEnabled && !captchaToken) {
+    if (captchaRequired === true && !captchaToken) {
       setErr(t("auth.captchaMissing"));
       return;
     }

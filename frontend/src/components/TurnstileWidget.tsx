@@ -2,11 +2,19 @@
 
 import { useEffect, useId, useRef } from "react";
 
-// Build-time config: empty string disables the widget completely (the
-// component renders nothing). Set NEXT_PUBLIC_TURNSTILE_SITE_KEY in .env
-// to opt in. The matching backend env var is TURNSTILE_ENABLED+TURNSTILE_SECRET_KEY.
-export const TURNSTILE_SITE_KEY = process.env.NEXT_PUBLIC_TURNSTILE_SITE_KEY ?? "";
-export const isTurnstileEnabled = TURNSTILE_SITE_KEY.length > 0;
+import { usePublicConfig } from "@/lib/publicConfig";
+
+/** Hook: ``true`` iff the backend has Turnstile enabled AND has handed
+ * us a non-empty site key via /api/v1/config. Pages use this to gate
+ * their submit handlers ("require captcha token before allowing form
+ * submit"). Returns ``undefined`` while the config is still loading,
+ * which callers treat as "don't submit yet".
+ */
+export function useTurnstileEnabled(): boolean | undefined {
+  const cfg = usePublicConfig();
+  if (cfg.data == null) return undefined;
+  return cfg.data.captcha_enabled && cfg.data.turnstile_site_key.length > 0;
+}
 
 declare global {
   interface Window {
@@ -78,16 +86,19 @@ export function TurnstileWidget({ onToken }: Props) {
   const id = useId();
   const containerRef = useRef<HTMLDivElement | null>(null);
   const widgetIdRef = useRef<string | null>(null);
+  const cfg = usePublicConfig();
+  const siteKey = cfg.data?.turnstile_site_key ?? "";
+  const enabled = !!cfg.data?.captcha_enabled && siteKey.length > 0;
 
   useEffect(() => {
-    if (!isTurnstileEnabled) return;
+    if (!enabled) return;
     if (!containerRef.current) return;
     let cancelled = false;
     loadTurnstileScript()
       .then(() => {
         if (cancelled || !containerRef.current || !window.turnstile) return;
         widgetIdRef.current = window.turnstile.render(containerRef.current, {
-          sitekey: TURNSTILE_SITE_KEY,
+          sitekey: siteKey,
           theme: "dark",
           callback: (token: string) => onToken(token),
           "error-callback": () => onToken(null),
@@ -109,8 +120,8 @@ export function TurnstileWidget({ onToken }: Props) {
     // intentionally exclude onToken: re-rendering the widget on every parent
     // render would loop. The latest onToken closure is captured at mount.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [enabled, siteKey]);
 
-  if (!isTurnstileEnabled) return null;
+  if (!enabled) return null;
   return <div id={`turnstile-${id}`} ref={containerRef} className="mt-1" />;
 }

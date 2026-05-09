@@ -9,7 +9,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy import select
 
 from app.api.v1.router import api_router
-from app.config import settings
+from app.config import assert_production_secrets, settings
 from app.core.errors import register_exception_handlers
 from app.db import async_session_factory
 from app.models import AppSetting
@@ -43,6 +43,10 @@ async def _resolve_active_ai_provider() -> str:
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    # Refuse to start in production with the placeholder values from
+    # .env.example — those would silently expose the app to JWT-forging.
+    assert_production_secrets()
+
     # Seed reference data on every boot. Safe (idempotent) — uses upserts.
     try:
         async with async_session_factory() as session:
