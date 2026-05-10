@@ -46,7 +46,9 @@ class ReportPlayerOut(BaseModel):
     damage_done: int
     healing_done: int
     deaths: int
-    talents_loadout: str | None
+    # Modern WoW returns a list of `{id, rank, nodeID}` dicts; legacy/Classic
+    # logs may emit a serialized string. JSON-serializable either way.
+    talents_loadout: Any | None = None
     casts: list[ReportPlayerCastOut] = Field(default_factory=list)
     gear: list[ReportPlayerGearOut] = Field(default_factory=list)
     # ``extras`` carries auxiliary JSON we don't want serialised wholesale

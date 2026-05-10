@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import uuid
 from datetime import datetime
+from typing import Any
 
 from sqlalchemy import (
     BigInteger,
@@ -113,7 +114,10 @@ class ReportPlayer(Base):
     damage_done: Mapped[int] = mapped_column(BigInteger, default=0, nullable=False)
     healing_done: Mapped[int] = mapped_column(BigInteger, default=0, nullable=False)
     deaths: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
-    talents_loadout: Mapped[str | None] = mapped_column(String(2048), nullable=True)
+    # Modern (DF/TWW) WoW returns this as a list of {id, rank, nodeID}
+    # dicts via ``combatantInfo.talentTree``; older shapes / Classic eras
+    # may pass a serialized string. JSONB stores either verbatim.
+    talents_loadout: Mapped[Any | None] = mapped_column(JSONType, nullable=True)
     extras: Mapped[dict] = mapped_column(JSONType, default=dict, nullable=False)
 
     fight: Mapped[ReportFight] = relationship(back_populates="players")
