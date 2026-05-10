@@ -268,20 +268,38 @@ async def _import_talents(
     ID namespace with old MoP-era spells purely by accident, so looking
     them up under ``kind=spell`` returns confidently-wrong names ("Egg
     Shell" instead of "Festermight" etc.). We materialise a separate
-    ``kind=talent`` row per (entry_id, locale) where the name is resolved
-    via the chain:
+    ``kind=talent`` row per (entry_id, locale) using two resolution
+    strategies depending on the entry's ``NodeEntryType``:
 
-        TraitNodeEntry.ID
-          → TraitDefinition (via TraitDefinitionID)
-              → OverrideName_lang  (explicit per-talent name, if any)
-              → VisibleSpellID     (what the in-game UI shows)
-              → SpellID            (canonical fallback)
+    1) **Class / spec / hero talents** (TraitDefinitionID set). Walk the
+       chain:
 
-    Both ``VisibleSpellID`` and ``SpellID`` are resolved against rows we
-    already imported under ``kind=spell``, which is why this phase MUST
-    run after ``_import_spell_names``.
+           TraitNodeEntry.ID
+             → TraitDefinition (via TraitDefinitionID)
+                 → OverrideName_lang  (explicit per-talent name, if any)
+                 → VisibleSpellID     (what the in-game UI shows)
+                 → SpellID            (canonical fallback)
+
+       Both ``VisibleSpellID`` and ``SpellID`` are resolved against rows
+       imported under ``kind=spell``, which is why this phase MUST run
+       after ``_import_spell_names``.
+
+    2) **Hero-tree selection nodes** (TraitDefinitionID=0, TraitSubTreeID
+       set, NodeEntryType=2). These are the entries WCL ships when a
+       player picks a hero spec ("Spellslinger", "Frostfire", "Sanlayn",
+       "Deathbringer", …). They have no spell, just a sub-tree pointer,
+       so we resolve via:
+
+           TraitNodeEntry.ID
+             → TraitSubTree.Name_lang (via TraitSubTreeID)
+
+       Hero talents make a huge gameplay difference, so leaving these
+       unresolved would still let the AI claim "no talent recommendation
+       possible" when in fact the chosen hero tree is the most important
+       single decision in modern WoW.
     """
-    # 1) Structural map: entry_id → trait_def_id (locale-agnostic).
+    # 1) Structural map: entry_id → trait_def_id  OR  entry_id → subtree_id
+    # for the hero-tree selection entries. Locale-agnostic.
     try:
         nodes_csv = await _download_csv(client, "TraitNodeEntry", build, "enUS")
     except UpstreamError as exc:
@@ -289,6 +307,7 @@ async def _import_talents(
         missing.append("TraitNodeEntry")
         return 0
     entry_to_def: dict[int, int] = {}
+    entry_to_subtree: dict[int, int] = {}
     for entry in _iter_rows(nodes_csv):
         try:
             eid = int(entry["ID"])
@@ -297,14 +316,20 @@ async def _import_talents(
             continue
         if did:
             entry_to_def[eid] = did
+            continue
+        try:
+            stid = int(entry.get("TraitSubTreeID") or 0)
+        except ValueError:
+            stid = 0
+        if stid:
+            entry_to_subtree[eid] = stid
 
-    if not entry_to_def:
+    if not entry_to_def and not entry_to_subtree:
         missing.append("TraitNodeEntry/empty")
         return 0
 
-    # 2) Per locale: download TraitDefinition (for OverrideName_lang) and
-    # build entry → name. Spell-name fallback uses wow_localizations rows
-    # we already imported under kind=spell.
+    # 2) Per locale: download TraitDefinition + TraitSubTree, build the
+    # name maps, and emit one row per (entry, locale).
     total = 0
     for locale_short, locale_code in LOCALES:
         try:
@@ -312,29 +337,49 @@ async def _import_talents(
         except UpstreamError as exc:
             logger.warning("TraitDefinition/%s skipped: %s", locale_code, exc)
             missing.append(f"TraitDefinition/{locale_code}")
-            continue
+            defs_csv = ""
 
         # def_id → (override_name, visible_spell_id, spell_id)
         defs: dict[int, tuple[str, int, int]] = {}
-        for entry in _iter_rows(defs_csv):
-            try:
-                did = int(entry["ID"])
-            except (KeyError, ValueError):
-                continue
-            override = (entry.get("OverrideName_lang") or "").strip()
-            try:
-                vsid = int(entry.get("VisibleSpellID") or 0)
-            except ValueError:
-                vsid = 0
-            try:
-                sid = int(entry.get("SpellID") or 0)
-            except ValueError:
-                sid = 0
-            defs[did] = (override, vsid, sid)
+        if defs_csv:
+            for entry in _iter_rows(defs_csv):
+                try:
+                    did = int(entry["ID"])
+                except (KeyError, ValueError):
+                    continue
+                override = (entry.get("OverrideName_lang") or "").strip()
+                try:
+                    vsid = int(entry.get("VisibleSpellID") or 0)
+                except ValueError:
+                    vsid = 0
+                try:
+                    sid = int(entry.get("SpellID") or 0)
+                except ValueError:
+                    sid = 0
+                defs[did] = (override, vsid, sid)
 
-        # Bulk-load every spell name we might need from the cache. We
-        # gather the union of VisibleSpellID + SpellID across all
-        # definitions, then a single SELECT pulls them.
+        # Hero-tree names. Best-effort: a missing locale only loses the
+        # localised hero-tree label, not the whole talent import.
+        try:
+            subtrees_csv = await _download_csv(client, "TraitSubTree", build, locale_code)
+        except UpstreamError as exc:
+            logger.warning("TraitSubTree/%s skipped: %s", locale_code, exc)
+            missing.append(f"TraitSubTree/{locale_code}")
+            subtrees_csv = ""
+
+        subtree_names: dict[int, str] = {}
+        if subtrees_csv:
+            for entry in _iter_rows(subtrees_csv):
+                try:
+                    stid = int(entry["ID"])
+                except (KeyError, ValueError):
+                    continue
+                name = (entry.get("Name_lang") or "").strip()
+                if name:
+                    subtree_names[stid] = name
+
+        # Bulk-load every spell name we might need from the cache. Union
+        # of VisibleSpellID + SpellID across all definitions, single SELECT.
         wanted_spell_ids: set[int] = set()
         for _, vsid, sid in defs.values():
             if vsid:
@@ -355,6 +400,8 @@ async def _import_talents(
 
         rows: list[dict[str, Any]] = []
         skipped_no_name = 0
+
+        # Class/spec/hero talents (have a TraitDefinition).
         for eid, did in entry_to_def.items():
             triple = defs.get(did)
             if triple is None:
@@ -380,11 +427,38 @@ async def _import_talents(
                     },
                 }
             )
+
+        # Hero-tree selection entries (TraitDefinitionID=0, point to a
+        # TraitSubTree). Prefix the localised name with "Hero-Talente:"
+        # so the AI doesn't confuse a tree pick (one selection per
+        # spec) with an individual talent node.
+        hero_tree_label = "Hero-Talents" if locale_short == "en" else "Heldentalente"
+        hero_emitted = 0
+        for eid, stid in entry_to_subtree.items():
+            name = subtree_names.get(stid)
+            if not name:
+                skipped_no_name += 1
+                continue
+            rows.append(
+                {
+                    "kind": "talent",
+                    "game_id": eid,
+                    "locale": locale_short,
+                    "name": f"{hero_tree_label}: {name}",
+                    "extras": {
+                        "trait_subtree_id": stid,
+                        "node_entry_type": 2,
+                    },
+                }
+            )
+            hero_emitted += 1
+
         n = await _upsert_localizations(session, rows)
         logger.info(
-            "imported Talent/%s: %s rows (skipped %s without resolvable name)",
+            "imported Talent/%s: %s rows (hero-tree picks=%s, skipped=%s)",
             locale_code,
             n,
+            hero_emitted,
             skipped_no_name,
         )
         total += n
