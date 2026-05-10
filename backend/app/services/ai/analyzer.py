@@ -385,6 +385,11 @@ async def _collect_localized_names(
     spell_ids: set[int] = set()
     item_ids: set[int] = set()
     encounter_ids: set[int] = set()
+    # Talent IDs from combatantInfo.talentTree are TraitNodeEntry IDs, NOT
+    # SpellIDs — the namespaces collide (96173 hits "Egg Shell" instead of
+    # "Festermight"). Resolve them against kind=talent which is the
+    # pre-baked TraitNodeEntry → SpellName chain.
+    talent_ids: set[int] = set()
 
     encounter_pairs: list[tuple[int, str]] = []
     if fight_summary.get("encounter_id"):
@@ -401,7 +406,7 @@ async def _collect_localized_names(
             spell_ids.add(int(entry["ability_id"]))
     for tid in player_summary.get("talent_ids") or []:
         if tid:
-            spell_ids.add(int(tid))
+            talent_ids.add(int(tid))
     for c in casts:
         if c.get("ability_id"):
             spell_ids.add(int(c["ability_id"]))
@@ -426,7 +431,7 @@ async def _collect_localized_names(
                 spell_ids.add(int(entry["ability_id"]))
         for tid in detail.get("talent_ids") or []:
             if tid:
-                spell_ids.add(int(tid))
+                talent_ids.add(int(tid))
 
     names = await lookup_names(
         session,
@@ -434,6 +439,7 @@ async def _collect_localized_names(
         spell_ids=spell_ids,
         item_ids=item_ids,
         encounter_ids=set(),  # encounters resolved separately with EN-name fallback
+        talent_ids=talent_ids,
     )
     if encounter_pairs:
         encounter_names = await resolve_encounter_names_with_fallback(

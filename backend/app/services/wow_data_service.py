@@ -257,6 +257,140 @@ async def _import_items(
     return total
 
 
+async def _import_talents(
+    session: AsyncSession, client: httpx.AsyncClient, build: str, missing: list[str]
+) -> int:
+    """Import the Trait* DBC chain so talent IDs from ``combatantInfo.talentTree``
+    resolve to human-readable names.
+
+    Why this is its own kind: the IDs WCL ships in ``talentTree`` are
+    ``TraitNodeEntry.ID`` values, NOT ``Spell.ID`` values. They share an
+    ID namespace with old MoP-era spells purely by accident, so looking
+    them up under ``kind=spell`` returns confidently-wrong names ("Egg
+    Shell" instead of "Festermight" etc.). We materialise a separate
+    ``kind=talent`` row per (entry_id, locale) where the name is resolved
+    via the chain:
+
+        TraitNodeEntry.ID
+          → TraitDefinition (via TraitDefinitionID)
+              → OverrideName_lang  (explicit per-talent name, if any)
+              → VisibleSpellID     (what the in-game UI shows)
+              → SpellID            (canonical fallback)
+
+    Both ``VisibleSpellID`` and ``SpellID`` are resolved against rows we
+    already imported under ``kind=spell``, which is why this phase MUST
+    run after ``_import_spell_names``.
+    """
+    # 1) Structural map: entry_id → trait_def_id (locale-agnostic).
+    try:
+        nodes_csv = await _download_csv(client, "TraitNodeEntry", build, "enUS")
+    except UpstreamError as exc:
+        logger.warning("TraitNodeEntry skipped: %s", exc)
+        missing.append("TraitNodeEntry")
+        return 0
+    entry_to_def: dict[int, int] = {}
+    for entry in _iter_rows(nodes_csv):
+        try:
+            eid = int(entry["ID"])
+            did = int(entry["TraitDefinitionID"])
+        except (KeyError, ValueError):
+            continue
+        if did:
+            entry_to_def[eid] = did
+
+    if not entry_to_def:
+        missing.append("TraitNodeEntry/empty")
+        return 0
+
+    # 2) Per locale: download TraitDefinition (for OverrideName_lang) and
+    # build entry → name. Spell-name fallback uses wow_localizations rows
+    # we already imported under kind=spell.
+    total = 0
+    for locale_short, locale_code in LOCALES:
+        try:
+            defs_csv = await _download_csv(client, "TraitDefinition", build, locale_code)
+        except UpstreamError as exc:
+            logger.warning("TraitDefinition/%s skipped: %s", locale_code, exc)
+            missing.append(f"TraitDefinition/{locale_code}")
+            continue
+
+        # def_id → (override_name, visible_spell_id, spell_id)
+        defs: dict[int, tuple[str, int, int]] = {}
+        for entry in _iter_rows(defs_csv):
+            try:
+                did = int(entry["ID"])
+            except (KeyError, ValueError):
+                continue
+            override = (entry.get("OverrideName_lang") or "").strip()
+            try:
+                vsid = int(entry.get("VisibleSpellID") or 0)
+            except ValueError:
+                vsid = 0
+            try:
+                sid = int(entry.get("SpellID") or 0)
+            except ValueError:
+                sid = 0
+            defs[did] = (override, vsid, sid)
+
+        # Bulk-load every spell name we might need from the cache. We
+        # gather the union of VisibleSpellID + SpellID across all
+        # definitions, then a single SELECT pulls them.
+        wanted_spell_ids: set[int] = set()
+        for _, vsid, sid in defs.values():
+            if vsid:
+                wanted_spell_ids.add(vsid)
+            if sid:
+                wanted_spell_ids.add(sid)
+
+        spell_names: dict[int, str] = {}
+        if wanted_spell_ids:
+            stmt = (
+                select(WowLocalization.game_id, WowLocalization.name)
+                .where(WowLocalization.kind == "spell")
+                .where(WowLocalization.locale == locale_short)
+                .where(WowLocalization.game_id.in_(wanted_spell_ids))
+            )
+            for gid, name in (await session.execute(stmt)).all():
+                spell_names[int(gid)] = name
+
+        rows: list[dict[str, Any]] = []
+        skipped_no_name = 0
+        for eid, did in entry_to_def.items():
+            triple = defs.get(did)
+            if triple is None:
+                continue
+            override, vsid, sid = triple
+            name = override
+            if not name and vsid:
+                name = spell_names.get(vsid, "")
+            if not name and sid:
+                name = spell_names.get(sid, "")
+            if not name:
+                skipped_no_name += 1
+                continue
+            rows.append(
+                {
+                    "kind": "talent",
+                    "game_id": eid,
+                    "locale": locale_short,
+                    "name": name,
+                    "extras": {
+                        "trait_definition_id": did,
+                        "spell_id": sid or vsid or None,
+                    },
+                }
+            )
+        n = await _upsert_localizations(session, rows)
+        logger.info(
+            "imported Talent/%s: %s rows (skipped %s without resolvable name)",
+            locale_code,
+            n,
+            skipped_no_name,
+        )
+        total += n
+    return total
+
+
 async def _import_encounters(
     session: AsyncSession, client: httpx.AsyncClient, build: str, missing: list[str]
 ) -> int:
@@ -403,11 +537,15 @@ async def run_full_import(session: AsyncSession, *, build: str | None = None) ->
         try:
             await _set_phase("spells")
             spells = await _import_spell_names(session, client, build, missing)
+            # Talents resolve via the spell cache so they MUST run after
+            # _import_spell_names.
+            await _set_phase("talents")
+            talents = await _import_talents(session, client, build, missing)
             await _set_phase("items")
             items = await _import_items(session, client, build, missing)
             await _set_phase("encounters")
             encounters = await _import_encounters(session, client, build, missing)
-            run.rows_imported = spells + items + encounters
+            run.rows_imported = spells + talents + items + encounters
             run.finished_at = datetime.now(UTC)
             run.phase = ""
 
@@ -415,6 +553,8 @@ async def run_full_import(session: AsyncSession, *, build: str | None = None) ->
             # one locale must have landed for each table. Otherwise wago.tools
             # was completely unreachable and we mark the run failed so the
             # admin UI doesn't claim "Aktuell" for a half-empty cache.
+            # Talents are best-effort — we don't fail the whole import if the
+            # Trait* tables are missing for a fresh build.
             if spells == 0 or items == 0 or encounters == 0:
                 run.status = WowImportStatus.failed.value
                 run.notes = (
@@ -422,7 +562,7 @@ async def run_full_import(session: AsyncSession, *, build: str | None = None) ->
                 )[:1000]
             else:
                 run.status = WowImportStatus.success.value
-                base = f"spells={spells} items={items} encounters={encounters}"
+                base = f"spells={spells} talents={talents} items={items} encounters={encounters}"
                 if missing:
                     base += (
                         f" — partial (missing locales: {', '.join(missing)}); "
@@ -476,19 +616,28 @@ async def lookup_names(
     spell_ids: Iterable[int] = (),
     item_ids: Iterable[int] = (),
     encounter_ids: Iterable[int] = (),
+    talent_ids: Iterable[int] = (),
 ) -> dict[str, str]:
     """Return ``{"spell:123": "Name", "item:42": "...", ...}`` for the given IDs.
 
     Always falls back to English when a translation is missing (e.g. brand-new
     spells that haven't been translated yet, or imports that haven't finished).
+
+    ``talent_ids`` are resolved against ``kind=talent`` rows, which are the
+    pre-resolved ``TraitNodeEntry → SpellName`` chain. Importantly we do NOT
+    fall back to ``kind=spell`` for talents — the IDs collide with old spell
+    IDs and would return confidently-wrong names ("Egg Shell" instead of
+    "Festermight"). If the talent cache is missing or has no row for a given
+    ID, we'd rather emit no name at all and let the AI know it can't cite it.
     """
     if locale not in {"en", "de"}:
         locale = "en"
     spell_ids = list({int(x) for x in spell_ids if x})
     item_ids = list({int(x) for x in item_ids if x})
     encounter_ids = list({int(x) for x in encounter_ids if x})
+    talent_ids = list({int(x) for x in talent_ids if x})
 
-    if not (spell_ids or item_ids or encounter_ids):
+    if not (spell_ids or item_ids or encounter_ids or talent_ids):
         return {}
 
     out: dict[str, str] = {}
@@ -509,6 +658,11 @@ async def lookup_names(
             clauses.append(
                 (WowLocalization.kind == "encounter")
                 & (WowLocalization.game_id.in_(encounter_ids))
+            )
+        if talent_ids:
+            clauses.append(
+                (WowLocalization.kind == "talent")
+                & (WowLocalization.game_id.in_(talent_ids))
             )
         if not clauses:
             return
