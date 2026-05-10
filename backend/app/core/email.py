@@ -14,10 +14,15 @@ from app.config import settings
 logger = logging.getLogger(__name__)
 
 _TEMPLATES_DIR = Path(__file__).parent.parent / "data" / "email_templates"
+# NOTE: do NOT pass ``enable_async=True`` here. ``_render`` calls the sync
+# ``template.render(...)`` and Jinja's behaviour when the env is in async
+# mode is to wrap the call in ``asyncio.run(template.render_async(...))``.
+# That blows up with ``RuntimeError: asyncio.run() cannot be called from a
+# running event loop`` inside any FastAPI handler / arq job (e.g. password
+# reset). Email templates are tiny — sync rendering is plenty fast.
 _jinja = Environment(
     loader=FileSystemLoader(str(_TEMPLATES_DIR)),
     autoescape=select_autoescape(["html", "xml"]),
-    enable_async=True,
 )
 
 
