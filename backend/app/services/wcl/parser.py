@@ -260,6 +260,44 @@ def parse_player_details(payload: dict[str, Any]) -> list[dict[str, Any]]:
                 or (combatant.get("talentTree") if isinstance(combatant, dict) else None)
                 or (combatant.get("talents_string") if isinstance(combatant, dict) else None)
             )
+            # Modern WoW (DF/TWW) ships `combatantInfo.talents` as `[]` and
+            # puts the actual picks in the talent-tree loadout — list of
+            # `{id, rank, nodeID}` entries. Backfill talent_ids from the
+            # loadout so the AI prompt always has a flat ID list to cite,
+            # regardless of expansion.
+            if not talent_ids and isinstance(loadout, list):
+                for t in loadout:
+                    if not isinstance(t, dict):
+                        continue
+                    tid = t.get("id") or t.get("talentID") or t.get("guid")
+                    if tid is None:
+                        continue
+                    try:
+                        talent_ids.append(int(tid))
+                    except (TypeError, ValueError):
+                        continue
+            # Secondary stats + primary attributes from combatantInfo.stats.
+            # WCL packages them as ``{"Strength": {"min": x, "max": y}, ...}``;
+            # we collapse to the max value (peak gear/buffs) for AI prompts.
+            stats: dict[str, int] = {}
+            raw_stats = (
+                combatant.get("stats") if isinstance(combatant, dict) else None
+            )
+            if isinstance(raw_stats, dict):
+                for stat_name, val in raw_stats.items():
+                    if isinstance(val, dict):
+                        # ``max`` is the peak value during the fight (with
+                        # buffs/procs); ``min`` is unbuffed baseline. AI
+                        # cares about peak — that's what shows in armoury.
+                        v = val.get("max") if val.get("max") is not None else val.get("min")
+                    elif isinstance(val, (int, float)):
+                        v = val
+                    else:
+                        continue
+                    try:
+                        stats[str(stat_name)] = int(v)
+                    except (TypeError, ValueError):
+                        continue
             out.append(
                 {
                     "actor_id": int(p["id"]),
@@ -271,6 +309,7 @@ def parse_player_details(payload: dict[str, Any]) -> list[dict[str, Any]]:
                     "item_level": float(ilvl) if ilvl is not None else None,
                     "talents_loadout": loadout,
                     "talent_ids": talent_ids,
+                    "stats": stats,
                     "raw": p,
                 }
             )
