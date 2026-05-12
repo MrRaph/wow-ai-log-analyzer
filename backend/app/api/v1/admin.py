@@ -43,6 +43,24 @@ def _settings_value(rows: list[AppSetting], key: str, default: object) -> object
     return default
 
 
+_VALID_REASONING_EFFORT = {"", "minimal", "low", "medium", "high"}
+
+
+def _normalize_reasoning_effort(raw: object) -> str | None:
+    """Coerce a stored / submitted reasoning_effort into the canonical form.
+
+    Returns ``None`` when the value is empty / missing / invalid. Returns the
+    lowercased string otherwise. Centralised so the GET + PATCH endpoints
+    agree on what counts as ``"unset"``.
+    """
+    if raw is None:
+        return None
+    value = str(raw).strip().lower()
+    if not value or value not in _VALID_REASONING_EFFORT:
+        return None
+    return value or None
+
+
 @router.get("/settings", response_model=AdminSettingsOut)
 async def read_settings(session: SessionDep, _: AdminUser) -> AdminSettingsOut:
     rows = (await session.execute(select(AppSetting))).scalars().all()
@@ -50,6 +68,9 @@ async def read_settings(session: SessionDep, _: AdminUser) -> AdminSettingsOut:
         allow_registration=bool(_settings_value(rows, "allow_registration", settings.allow_registration)),
         ai_provider=str(_settings_value(rows, "ai_provider", settings.ai_provider)),
         ai_model=str(_settings_value(rows, "ai_model", settings.ai_model)),
+        openai_reasoning_effort=_normalize_reasoning_effort(
+            _settings_value(rows, "openai_reasoning_effort", settings.openai_reasoning_effort)
+        ),
     )
 
 
@@ -70,6 +91,13 @@ async def update_settings(
         await _upsert_setting(session, "ai_provider", {"value": payload.ai_provider})
     if payload.ai_model is not None:
         await _upsert_setting(session, "ai_model", {"value": payload.ai_model})
+    if payload.openai_reasoning_effort is not None:
+        # Empty string explicitly clears the override → falls back to OpenAI's
+        # default (no reasoning). Anything else is validated against the
+        # canonical set; junk values are silently coerced to "" so a typo
+        # in a curl request can't poison the cache.
+        normalized = _normalize_reasoning_effort(payload.openai_reasoning_effort) or ""
+        await _upsert_setting(session, "openai_reasoning_effort", {"value": normalized})
     await session.commit()
 
     # When the provider toggles, align the local-ai container *and* its

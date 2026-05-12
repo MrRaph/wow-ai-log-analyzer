@@ -63,14 +63,47 @@ async def _resolve_provider_choice(session: AsyncSession) -> str:
     return settings.ai_provider
 
 
-def _provider_for(choice: str) -> AiProvider:
+def _provider_for(choice: str, *, openai_reasoning_effort: str | None = None) -> AiProvider:
     if choice == "anthropic":
         return AnthropicProvider()
     if choice == "openai":
-        return OpenAiCompatibleProvider(mode="openai")
+        # The admin Settings panel can override the env-level
+        # ``OPENAI_REASONING_EFFORT`` via the ``openai_reasoning_effort``
+        # AppSetting; the caller resolves it and passes it here so we don't
+        # silently inherit the env default when an admin has explicitly set
+        # the override to "" (= off).
+        return OpenAiCompatibleProvider(
+            mode="openai", reasoning_effort=openai_reasoning_effort
+        )
     if choice == "local":
         return OpenAiCompatibleProvider(mode="local")
     raise UpstreamError(f"Unsupported AI provider: {choice}")
+
+
+async def _resolve_openai_reasoning_effort(session: AsyncSession) -> str | None:
+    """Read the admin override for OpenAI reasoning_effort.
+
+    Semantics mirror the per-user BYOK dropdown:
+
+      - "minimal" / "low" / "medium" / "high" → admin chose this value;
+        the provider uses it.
+      - "" or no AppSetting row → no override; the provider falls back to
+        ``settings.openai_reasoning_effort`` (env).
+
+    Returning ``None`` from this helper covers both "no row stored" and
+    "explicitly empty string saved" — both mean "fall through to env".
+    """
+    row = (
+        await session.execute(
+            select(AppSetting).where(AppSetting.key == "openai_reasoning_effort")
+        )
+    ).scalar_one_or_none()
+    if not row or not row.value:
+        return None
+    value = str((row.value or {}).get("value") or "").strip().lower()
+    if value in {"minimal", "low", "medium", "high"}:
+        return value
+    return None
 
 
 async def _resolve_model(session: AsyncSession, choice: str) -> str:
@@ -744,7 +777,16 @@ async def request_analysis(
                 "own AI provider in your profile and try again."
             )
         chosen_model = await _resolve_model(session, chosen_provider)
-        used_provider = provider or _provider_for(chosen_provider)
+        # Only OpenAI listens to ``reasoning_effort`` — fetch it cheaply and
+        # let ``_provider_for`` decide whether to plumb it through.
+        admin_effort = (
+            await _resolve_openai_reasoning_effort(session)
+            if chosen_provider == "openai"
+            else None
+        )
+        used_provider = provider or _provider_for(
+            chosen_provider, openai_reasoning_effort=admin_effort
+        )
 
     if existing_row is not None:
         analysis = existing_row
