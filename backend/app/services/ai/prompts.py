@@ -120,10 +120,14 @@ improvement report for ONE player on ONE fight. The report must:
 - Avoid filler. If something is fine, mention it briefly under "strengths".
 - Do not fabricate spell names, item names, or numbers.
 - The supplied ``localized_names`` map (keys ``spell:<id>``, ``item:<id>``,
-  ``encounter:<id>``) is the **only** source of truth for spell/item/encounter
-  names. Use those strings verbatim — do not translate them yourself, and do
-  not invent names for IDs that aren't in the map (when an ID is missing,
-  refer to it as e.g. ``spell #12345``).
+  ``encounter:<id>``, ``talent:<id>``) is the **only** source of truth for
+  spell/item/encounter/talent names. Use those strings verbatim — do not
+  translate them yourself, and do not invent names for IDs that aren't in
+  the map (when an ID is missing, refer to it as e.g. ``spell #12345`` or
+  ``talent #98765``). Note that ``talent_ids`` and ``casts/buffs/debuffs``
+  IDs come from different namespaces: NEVER look up a ``talent_id`` under
+  ``spell:<id>`` (or vice versa) — the ID spaces collide and you'd get a
+  confidently-wrong name.
 - The supplied ``stat_glossary`` map is the **only** source of truth for WoW
   stat / mechanic terminology (Strength/Stärke, Haste/Tempo, Mastery/
   Meisterschaft, Versatility/Vielseitigkeit, …). Use the localised values
@@ -216,10 +220,15 @@ einem Kampf. Der Bericht muss:
   im Cast-Snapshot" — erfinde **keine** Cast→Buff-Beziehung.
 - Keine Floskeln. Was passt, kurz unter „strengths" erwähnen.
 - Keine Spellnamen, Itemnamen oder Zahlen erfinden.
-- Die mitgelieferte ``localized_names``-Map (Keys ``spell:<id>``, ``item:<id>``,
-  ``encounter:<id>``) ist die **einzige** Quelle für Namen. Nimm die Strings
-  exakt so, übersetze nichts selbst, und erfinde keine Namen für IDs, die
-  nicht in der Map stehen (für fehlende IDs schreib z.B. ``Zauber #12345``).
+- Die mitgelieferte ``localized_names``-Map (Keys ``spell:<id>``,
+  ``item:<id>``, ``encounter:<id>``, ``talent:<id>``) ist die **einzige**
+  Quelle für Namen. Nimm die Strings exakt so, übersetze nichts selbst,
+  und erfinde keine Namen für IDs, die nicht in der Map stehen (für
+  fehlende IDs schreib z.B. ``Zauber #12345`` oder ``Talent #98765``).
+  Beachte: ``talent_ids`` und ``casts/buffs/debuffs`` IDs liegen in
+  unterschiedlichen Namespaces — schlag eine ``talent_id`` NIEMALS unter
+  ``spell:<id>`` nach (oder umgekehrt). Die ID-Räume kollidieren und du
+  bekommst sonst einen mit Sicherheit falschen Namen.
 - Die mitgelieferte ``stat_glossary``-Map ist die **einzige** Quelle für
   Attribut-/Mechanik-Begriffe (Stärke, Tempo, Meisterschaft, Vielseitigkeit,
   Lebensentzug, Geschwindigkeit, Kritischer Trefferwert, …). Nimm die
