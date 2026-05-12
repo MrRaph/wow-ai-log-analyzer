@@ -14,7 +14,12 @@ import { WowDataCard } from "@/components/admin/WowDataCard";
 import { ApiClientError, apiFetch } from "@/lib/api";
 import { formatDateTime } from "@/lib/format";
 import type { Locale } from "@/i18n/config";
-import type { AdminSettings, Invite, UserOut } from "@/types/api";
+import type {
+  AdminSettings,
+  Invite,
+  ReasoningEffort,
+  UserOut,
+} from "@/types/api";
 
 export default function AdminPage({ params }: { params: Promise<{ locale: Locale }> }) {
   const { locale } = use(params);
@@ -45,12 +50,16 @@ function AdminView({ locale, currentUserId }: { locale: Locale; currentUserId: s
   const [allowReg, setAllowReg] = useState<boolean>(false);
   const [provider, setProvider] = useState<string>("anthropic");
   const [model, setModel] = useState<string>("claude-sonnet-4-6");
+  // "" = no override, fall back to server-side OPENAI_REASONING_EFFORT env.
+  // Mirrors the UserAiConfigPanel dropdown semantics.
+  const [reasoningEffort, setReasoningEffort] = useState<ReasoningEffort | "">("");
 
   useEffect(() => {
     if (settingsQ.data) {
       setAllowReg(settingsQ.data.allow_registration);
       setProvider(settingsQ.data.ai_provider);
       setModel(settingsQ.data.ai_model);
+      setReasoningEffort(settingsQ.data.openai_reasoning_effort ?? "");
     }
   }, [settingsQ.data]);
 
@@ -58,7 +67,16 @@ function AdminView({ locale, currentUserId }: { locale: Locale; currentUserId: s
     mutationFn: () =>
       apiFetch<AdminSettings>("/api/v1/admin/settings", {
         method: "PATCH",
-        body: { allow_registration: allowReg, ai_provider: provider, ai_model: model },
+        body: {
+          allow_registration: allowReg,
+          ai_provider: provider,
+          ai_model: model,
+          // Always send the field — backend coerces "" / unknown into
+          // "no override" so the env value still wins. Sending unconditionally
+          // is simpler than gating on provider===openai and avoids leaving
+          // a stale override behind when admin flips back to anthropic.
+          openai_reasoning_effort: reasoningEffort,
+        },
       }),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["admin-settings"] });
@@ -177,6 +195,26 @@ function AdminView({ locale, currentUserId }: { locale: Locale; currentUserId: s
               </Select>
             )}
           </div>
+          {provider === "openai" && (
+            <div className="md:col-span-3">
+              <Label>{t("admin.aiReasoningEffort")}</Label>
+              <Select
+                value={reasoningEffort}
+                onChange={(e) =>
+                  setReasoningEffort(e.target.value as ReasoningEffort | "")
+                }
+              >
+                <option value="">{t("admin.aiReasoningEffortOff")}</option>
+                <option value="minimal">minimal</option>
+                <option value="low">low</option>
+                <option value="medium">medium</option>
+                <option value="high">high</option>
+              </Select>
+              <p className="mt-1 text-xs text-zinc-500">
+                {t("admin.aiReasoningEffortHint")}
+              </p>
+            </div>
+          )}
         </div>
         <div className="mt-4 flex items-center gap-3">
           <Button onClick={() => saveSettings.mutate()} disabled={saveSettings.isPending}>
