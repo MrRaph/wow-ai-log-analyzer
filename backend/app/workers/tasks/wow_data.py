@@ -7,8 +7,12 @@ from datetime import UTC, datetime
 from sqlalchemy import select
 
 from app.db import async_session_factory
-from app.models import WowDataImport, WowImportStatus
-from app.services.wow_data_service import fetch_latest_build, run_full_import
+from app.models import WowDataImport, WowImportStatus, WowLocalization
+from app.services.wow_data_service import (
+    EXPECTED_KINDS,
+    fetch_latest_build,
+    run_full_import,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -35,12 +39,33 @@ async def refresh_wow_data(_ctx: dict) -> dict:
             )
         ).scalar_one_or_none()
 
-        # Skip only if the previous success was *complete*. A "partial"
-        # success means at least one locale CSV (typically deDE for fresh
-        # builds) failed to download — we want to retry next time so the
-        # missing rows fill in.
+        # Skip only if the previous success was *complete*. Three criteria:
+        # 1) Same build as the latest one on wago.
+        # 2) Not marked "partial" — that means at least one locale CSV
+        #    (typically deDE for fresh builds) failed to download and we
+        #    want to retry next time to fill in the missing rows.
+        # 3) Every ``kind`` the current code knows about is present in
+        #    wow_localizations. This catches the case where a code update
+        #    added a new importer phase (e.g. ``talent`` in v0.2.0) but
+        #    the last success row was from before that phase existed —
+        #    its build value would still match but the DB is missing the
+        #    new kind. Without this check, "Aktualisieren" silently no-ops
+        #    after an upgrade and admins are left wondering why the new
+        #    data never lands.
+        present_kinds: set[str] = set()
+        if last_success and last_success.build == latest:
+            present_kinds = {
+                row[0]
+                for row in (
+                    await session.execute(select(WowLocalization.kind).distinct())
+                ).all()
+            }
+        missing_kinds = EXPECTED_KINDS - present_kinds
         last_was_complete = bool(
-            last_success and last_success.build == latest and "partial" not in (last_success.notes or "")
+            last_success
+            and last_success.build == latest
+            and "partial" not in (last_success.notes or "")
+            and not missing_kinds
         )
         if last_was_complete:
             logger.info(
@@ -73,6 +98,13 @@ async def refresh_wow_data(_ctx: dict) -> dict:
                 await session.commit()
             return {"skipped": True, "build": latest}
 
+        if missing_kinds:
+            logger.info(
+                "wow_data: build %s matched but kinds missing in DB (%s) — "
+                "forcing re-import to fill in the gap",
+                latest,
+                sorted(missing_kinds),
+            )
         logger.info(
             "wow_data: importing build %s (last=%s)",
             latest,
