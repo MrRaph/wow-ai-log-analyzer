@@ -2,21 +2,23 @@
 <html lang="de">
 <head>
   <meta charset="utf-8">
+  <meta name="color-scheme" content="dark only">
+  <meta name="supported-color-schemes" content="dark only">
   <title>Du wurdest zu {{ app_name }} eingeladen</title>
 </head>
 <body style="font-family: system-ui, sans-serif; background:#0b0d10; color:#e5e7eb; padding:24px;">
   <div style="max-width:560px;margin:0 auto;background:#11161c;border:1px solid #1f2933;border-radius:12px;padding:32px;">
     <h1 style="margin:0 0 16px 0;font-size:22px;color:#fbbf24;">Einladung zu {{ app_name }}</h1>
-    <p>{{ inviter_name }} hat dich zu {{ app_name }} eingeladen — einem privaten WoW-Log-Analyzer, der zeigt, was du in Raid- und M+-Logs verbessern kannst.</p>
-    <p>Die Einladung ist 14 Tage gültig:</p>
+    <p style="color:#e5e7eb;line-height:1.5;">{{ inviter_name }} hat dich zu {{ app_name }} eingeladen — einem privaten WoW-Log-Analyzer, der zeigt, was du in Raid- und M+-Logs verbessern kannst.</p>
+    <p style="color:#e5e7eb;line-height:1.5;">Die Einladung ist 14 Tage gültig:</p>
     <p style="margin:24px 0;">
       <a href="{{ public_base_url }}/de/accept-invite?token={{ token }}"
          style="display:inline-block;background:#f59e0b;color:#0b0d10;font-weight:600;padding:12px 20px;border-radius:8px;text-decoration:none;">
         Einladung annehmen
       </a>
     </p>
-    <p style="font-size:12px;color:#9ca3af;">Funktioniert der Button nicht? Kopiere diesen Link in deinen Browser:<br>
-      <span style="word-break:break-all;">{{ public_base_url }}/de/accept-invite?token={{ token }}</span>
+    <p style="font-size:12px;color:#9ca3af;line-height:1.5;">Funktioniert der Button nicht? Kopiere diesen Link in deinen Browser:<br>
+      <span style="word-break:break-all;color:#9ca3af;">{{ public_base_url }}/de/accept-invite?token={{ token }}</span>
     </p>
   </div>
 </body>

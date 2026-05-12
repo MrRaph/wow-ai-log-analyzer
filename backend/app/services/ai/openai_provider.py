@@ -22,6 +22,11 @@ logger = logging.getLogger(__name__)
 
 Mode = Literal["openai", "local"]
 
+# Canonical cloud-OpenAI URL. Hardcoded as a safety net because the SDK's
+# own fallback (``os.environ["OPENAI_BASE_URL"]`` then the default) breaks
+# when the env var is set to an empty string — see the constructor below.
+_DEFAULT_OPENAI_BASE_URL = "https://api.openai.com/v1"
+
 
 class OpenAiCompatibleProvider:
     def __init__(
@@ -48,17 +53,36 @@ class OpenAiCompatibleProvider:
         self._mode = mode
         self._reasoning_effort_override = (reasoning_effort or "").strip().lower() or None
         if api_key is not None:
-            # BYOK / user-config path. Trust whatever the caller hands us.
-            self._client = AsyncOpenAI(api_key=api_key, base_url=base_url or None)
+            # BYOK / user-config path. Trust whatever the caller hands us
+            # for self-hosted (``local`` mode), but for cloud OpenAI we
+            # backstop an empty/missing URL with the canonical default —
+            # see the admin-path comment below for why.
+            cleaned_byok = (base_url or "").strip()
+            client_base_url = (
+                (cleaned_byok or _DEFAULT_OPENAI_BASE_URL)
+                if mode == "openai"
+                else (cleaned_byok or None)
+            )
+            self._client = AsyncOpenAI(api_key=api_key, base_url=client_base_url)
             self._default_model = model or (
                 settings.ai_model if mode == "openai" else settings.local_ai_model
             )
         elif mode == "openai":
             if not settings.openai_api_key:
                 raise UpstreamError("OPENAI_API_KEY is not configured.")
+            # IMPORTANT: never pass ``base_url=None`` to the OpenAI SDK
+            # here. When ``base_url`` is None the SDK falls back to
+            # ``os.environ["OPENAI_BASE_URL"]`` — and our .env ships
+            # ``OPENAI_BASE_URL=`` (empty) by default. The SDK then uses
+            # that empty string verbatim, so every request URL ends up
+            # missing its scheme and httpx fails with
+            # ``UnsupportedProtocol: Request URL is missing an
+            # 'http://' or 'https://' protocol``. Pass the canonical
+            # OpenAI URL explicitly when our setting is empty.
+            cleaned = (settings.openai_base_url or "").strip()
             self._client = AsyncOpenAI(
                 api_key=settings.openai_api_key,
-                base_url=settings.openai_base_url or None,
+                base_url=cleaned or _DEFAULT_OPENAI_BASE_URL,
             )
             self._default_model = settings.ai_model
         else:

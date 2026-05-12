@@ -63,14 +63,47 @@ async def _resolve_provider_choice(session: AsyncSession) -> str:
     return settings.ai_provider
 
 
-def _provider_for(choice: str) -> AiProvider:
+def _provider_for(choice: str, *, openai_reasoning_effort: str | None = None) -> AiProvider:
     if choice == "anthropic":
         return AnthropicProvider()
     if choice == "openai":
-        return OpenAiCompatibleProvider(mode="openai")
+        # The admin Settings panel can override the env-level
+        # ``OPENAI_REASONING_EFFORT`` via the ``openai_reasoning_effort``
+        # AppSetting; the caller resolves it and passes it here so we don't
+        # silently inherit the env default when an admin has explicitly set
+        # the override to "" (= off).
+        return OpenAiCompatibleProvider(
+            mode="openai", reasoning_effort=openai_reasoning_effort
+        )
     if choice == "local":
         return OpenAiCompatibleProvider(mode="local")
     raise UpstreamError(f"Unsupported AI provider: {choice}")
+
+
+async def _resolve_openai_reasoning_effort(session: AsyncSession) -> str | None:
+    """Read the admin override for OpenAI reasoning_effort.
+
+    Semantics mirror the per-user BYOK dropdown:
+
+      - "minimal" / "low" / "medium" / "high" → admin chose this value;
+        the provider uses it.
+      - "" or no AppSetting row → no override; the provider falls back to
+        ``settings.openai_reasoning_effort`` (env).
+
+    Returning ``None`` from this helper covers both "no row stored" and
+    "explicitly empty string saved" — both mean "fall through to env".
+    """
+    row = (
+        await session.execute(
+            select(AppSetting).where(AppSetting.key == "openai_reasoning_effort")
+        )
+    ).scalar_one_or_none()
+    if not row or not row.value:
+        return None
+    value = str((row.value or {}).get("value") or "").strip().lower()
+    if value in {"minimal", "low", "medium", "high"}:
+        return value
+    return None
 
 
 async def _resolve_model(session: AsyncSession, choice: str) -> str:
@@ -385,6 +418,11 @@ async def _collect_localized_names(
     spell_ids: set[int] = set()
     item_ids: set[int] = set()
     encounter_ids: set[int] = set()
+    # Talent IDs from combatantInfo.talentTree are TraitNodeEntry IDs, NOT
+    # SpellIDs — the namespaces collide (96173 hits "Egg Shell" instead of
+    # "Festermight"). Resolve them against kind=talent which is the
+    # pre-baked TraitNodeEntry → SpellName chain.
+    talent_ids: set[int] = set()
 
     encounter_pairs: list[tuple[int, str]] = []
     if fight_summary.get("encounter_id"):
@@ -401,7 +439,7 @@ async def _collect_localized_names(
             spell_ids.add(int(entry["ability_id"]))
     for tid in player_summary.get("talent_ids") or []:
         if tid:
-            spell_ids.add(int(tid))
+            talent_ids.add(int(tid))
     for c in casts:
         if c.get("ability_id"):
             spell_ids.add(int(c["ability_id"]))
@@ -426,7 +464,7 @@ async def _collect_localized_names(
                 spell_ids.add(int(entry["ability_id"]))
         for tid in detail.get("talent_ids") or []:
             if tid:
-                spell_ids.add(int(tid))
+                talent_ids.add(int(tid))
 
     names = await lookup_names(
         session,
@@ -434,6 +472,7 @@ async def _collect_localized_names(
         spell_ids=spell_ids,
         item_ids=item_ids,
         encounter_ids=set(),  # encounters resolved separately with EN-name fallback
+        talent_ids=talent_ids,
     )
     if encounter_pairs:
         encounter_names = await resolve_encounter_names_with_fallback(
@@ -583,6 +622,23 @@ async def request_analysis(
     )
     fight_summary["duration_minutes"] = round(fight_minutes, 2)
 
+    # Player-active-time normalisation. On a kill, ``active_time_ms`` equals
+    # the fight duration (player lived through it). On a wipe where the
+    # player died early, it's the time they were actually alive and
+    # contributing. We use the active time as the denominator for the
+    # player's own per-minute rates so a death at 1:30 in a 6:00 wipe
+    # doesn't make the rotation density look 4x too low — we'd be blaming
+    # the player for casts they couldn't do because they were dead.
+    # Falls back to fight_minutes when WCL didn't ship ``activeTime`` (very
+    # old fights, parser couldn't extract). Top-log refs are always kills
+    # so their duration === their active time — they keep using
+    # ``duration_minutes`` as before.
+    active_time_ms = int(player_extras.get("active_time_ms") or 0)
+    active_minutes = (
+        max(0.001, active_time_ms / 60_000) if active_time_ms else fight_minutes
+    )
+    player_summary["active_time_minutes"] = round(active_minutes, 2)
+
     def _annotate_casts(items: list[dict[str, Any]], minutes: float) -> list[dict[str, Any]]:
         out: list[dict[str, Any]] = []
         for c in items or []:
@@ -613,6 +669,8 @@ async def request_analysis(
             )
         return out
 
+    # Per-minute normalisation uses the player's active time, not the
+    # fight's total duration — see comment above next to ``active_minutes``.
     casts = _annotate_casts(
         [
             {
@@ -624,7 +682,7 @@ async def request_analysis(
             }
             for c in player.casts
         ],
-        fight_minutes,
+        active_minutes,
     )
     gear = [
         {
@@ -638,11 +696,15 @@ async def request_analysis(
         for g in player.gear
     ]
 
-    # Apply same normalisation to the player extras we just enriched, and to
-    # each top-log reference's detail data (each ref has its own duration).
+    # Same active-time denominator for damage_taken — the player can only
+    # eat mechanics while alive, so the rate of avoidable damage taken is
+    # honestly measured against the time they were up.
     player_summary["damage_taken"] = _annotate_damage_taken(
-        player_summary.get("damage_taken") or [], fight_minutes
+        player_summary.get("damage_taken") or [], active_minutes
     )
+    # ``duration_minutes`` on the player block stays as fight duration so
+    # the AI can still see the wipe length; the prompt is told explicitly
+    # to use ``active_time_minutes`` for per-minute math.
     player_summary["duration_minutes"] = round(fight_minutes, 2)
 
     annotated_refs: list[dict[str, Any]] = []
@@ -715,7 +777,16 @@ async def request_analysis(
                 "own AI provider in your profile and try again."
             )
         chosen_model = await _resolve_model(session, chosen_provider)
-        used_provider = provider or _provider_for(chosen_provider)
+        # Only OpenAI listens to ``reasoning_effort`` — fetch it cheaply and
+        # let ``_provider_for`` decide whether to plumb it through.
+        admin_effort = (
+            await _resolve_openai_reasoning_effort(session)
+            if chosen_provider == "openai"
+            else None
+        )
+        used_provider = provider or _provider_for(
+            chosen_provider, openai_reasoning_effort=admin_effort
+        )
 
     if existing_row is not None:
         analysis = existing_row

@@ -343,6 +343,11 @@ export interface AdminSettings {
   allow_registration: boolean;
   ai_provider: string;
   ai_model: string;
+  // OpenAI GPT-5 / o-series reasoning depth override. Only meaningful when
+  // ``ai_provider === "openai"``. ``null`` (or empty string) falls back to
+  // the server-side ``OPENAI_REASONING_EFFORT`` env. Mirrors the per-user
+  // BYOK ``reasoning_effort`` on ``UserAiConfig``.
+  openai_reasoning_effort: ReasoningEffort | null;
 }
 
 export interface WclConnectionStatus {

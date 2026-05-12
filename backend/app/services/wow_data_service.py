@@ -257,6 +257,214 @@ async def _import_items(
     return total
 
 
+async def _import_talents(
+    session: AsyncSession, client: httpx.AsyncClient, build: str, missing: list[str]
+) -> int:
+    """Import the Trait* DBC chain so talent IDs from ``combatantInfo.talentTree``
+    resolve to human-readable names.
+
+    Why this is its own kind: the IDs WCL ships in ``talentTree`` are
+    ``TraitNodeEntry.ID`` values, NOT ``Spell.ID`` values. They share an
+    ID namespace with old MoP-era spells purely by accident, so looking
+    them up under ``kind=spell`` returns confidently-wrong names ("Egg
+    Shell" instead of "Festermight" etc.). We materialise a separate
+    ``kind=talent`` row per (entry_id, locale) using two resolution
+    strategies depending on the entry's ``NodeEntryType``:
+
+    1) **Class / spec / hero talents** (TraitDefinitionID set). Walk the
+       chain:
+
+           TraitNodeEntry.ID
+             → TraitDefinition (via TraitDefinitionID)
+                 → OverrideName_lang  (explicit per-talent name, if any)
+                 → VisibleSpellID     (what the in-game UI shows)
+                 → SpellID            (canonical fallback)
+
+       Both ``VisibleSpellID`` and ``SpellID`` are resolved against rows
+       imported under ``kind=spell``, which is why this phase MUST run
+       after ``_import_spell_names``.
+
+    2) **Hero-tree selection nodes** (TraitDefinitionID=0, TraitSubTreeID
+       set, NodeEntryType=2). These are the entries WCL ships when a
+       player picks a hero spec ("Spellslinger", "Frostfire", "Sanlayn",
+       "Deathbringer", …). They have no spell, just a sub-tree pointer,
+       so we resolve via:
+
+           TraitNodeEntry.ID
+             → TraitSubTree.Name_lang (via TraitSubTreeID)
+
+       Hero talents make a huge gameplay difference, so leaving these
+       unresolved would still let the AI claim "no talent recommendation
+       possible" when in fact the chosen hero tree is the most important
+       single decision in modern WoW.
+    """
+    # 1) Structural map: entry_id → trait_def_id  OR  entry_id → subtree_id
+    # for the hero-tree selection entries. Locale-agnostic.
+    try:
+        nodes_csv = await _download_csv(client, "TraitNodeEntry", build, "enUS")
+    except UpstreamError as exc:
+        logger.warning("TraitNodeEntry skipped: %s", exc)
+        missing.append("TraitNodeEntry")
+        return 0
+    entry_to_def: dict[int, int] = {}
+    entry_to_subtree: dict[int, int] = {}
+    for entry in _iter_rows(nodes_csv):
+        try:
+            eid = int(entry["ID"])
+            did = int(entry["TraitDefinitionID"])
+        except (KeyError, ValueError):
+            continue
+        if did:
+            entry_to_def[eid] = did
+            continue
+        try:
+            stid = int(entry.get("TraitSubTreeID") or 0)
+        except ValueError:
+            stid = 0
+        if stid:
+            entry_to_subtree[eid] = stid
+
+    if not entry_to_def and not entry_to_subtree:
+        missing.append("TraitNodeEntry/empty")
+        return 0
+
+    # 2) Per locale: download TraitDefinition + TraitSubTree, build the
+    # name maps, and emit one row per (entry, locale).
+    total = 0
+    for locale_short, locale_code in LOCALES:
+        try:
+            defs_csv = await _download_csv(client, "TraitDefinition", build, locale_code)
+        except UpstreamError as exc:
+            logger.warning("TraitDefinition/%s skipped: %s", locale_code, exc)
+            missing.append(f"TraitDefinition/{locale_code}")
+            defs_csv = ""
+
+        # def_id → (override_name, visible_spell_id, spell_id)
+        defs: dict[int, tuple[str, int, int]] = {}
+        if defs_csv:
+            for entry in _iter_rows(defs_csv):
+                try:
+                    did = int(entry["ID"])
+                except (KeyError, ValueError):
+                    continue
+                override = (entry.get("OverrideName_lang") or "").strip()
+                try:
+                    vsid = int(entry.get("VisibleSpellID") or 0)
+                except ValueError:
+                    vsid = 0
+                try:
+                    sid = int(entry.get("SpellID") or 0)
+                except ValueError:
+                    sid = 0
+                defs[did] = (override, vsid, sid)
+
+        # Hero-tree names. Best-effort: a missing locale only loses the
+        # localised hero-tree label, not the whole talent import.
+        try:
+            subtrees_csv = await _download_csv(client, "TraitSubTree", build, locale_code)
+        except UpstreamError as exc:
+            logger.warning("TraitSubTree/%s skipped: %s", locale_code, exc)
+            missing.append(f"TraitSubTree/{locale_code}")
+            subtrees_csv = ""
+
+        subtree_names: dict[int, str] = {}
+        if subtrees_csv:
+            for entry in _iter_rows(subtrees_csv):
+                try:
+                    stid = int(entry["ID"])
+                except (KeyError, ValueError):
+                    continue
+                name = (entry.get("Name_lang") or "").strip()
+                if name:
+                    subtree_names[stid] = name
+
+        # Bulk-load every spell name we might need from the cache. Union
+        # of VisibleSpellID + SpellID across all definitions, single SELECT.
+        wanted_spell_ids: set[int] = set()
+        for _, vsid, sid in defs.values():
+            if vsid:
+                wanted_spell_ids.add(vsid)
+            if sid:
+                wanted_spell_ids.add(sid)
+
+        spell_names: dict[int, str] = {}
+        if wanted_spell_ids:
+            stmt = (
+                select(WowLocalization.game_id, WowLocalization.name)
+                .where(WowLocalization.kind == "spell")
+                .where(WowLocalization.locale == locale_short)
+                .where(WowLocalization.game_id.in_(wanted_spell_ids))
+            )
+            for gid, name in (await session.execute(stmt)).all():
+                spell_names[int(gid)] = name
+
+        rows: list[dict[str, Any]] = []
+        skipped_no_name = 0
+
+        # Class/spec/hero talents (have a TraitDefinition).
+        for eid, did in entry_to_def.items():
+            triple = defs.get(did)
+            if triple is None:
+                continue
+            override, vsid, sid = triple
+            name = override
+            if not name and vsid:
+                name = spell_names.get(vsid, "")
+            if not name and sid:
+                name = spell_names.get(sid, "")
+            if not name:
+                skipped_no_name += 1
+                continue
+            rows.append(
+                {
+                    "kind": "talent",
+                    "game_id": eid,
+                    "locale": locale_short,
+                    "name": name,
+                    "extras": {
+                        "trait_definition_id": did,
+                        "spell_id": sid or vsid or None,
+                    },
+                }
+            )
+
+        # Hero-tree selection entries (TraitDefinitionID=0, point to a
+        # TraitSubTree). Prefix the localised name with "Hero-Talente:"
+        # so the AI doesn't confuse a tree pick (one selection per
+        # spec) with an individual talent node.
+        hero_tree_label = "Hero-Talents" if locale_short == "en" else "Heldentalente"
+        hero_emitted = 0
+        for eid, stid in entry_to_subtree.items():
+            name = subtree_names.get(stid)
+            if not name:
+                skipped_no_name += 1
+                continue
+            rows.append(
+                {
+                    "kind": "talent",
+                    "game_id": eid,
+                    "locale": locale_short,
+                    "name": f"{hero_tree_label}: {name}",
+                    "extras": {
+                        "trait_subtree_id": stid,
+                        "node_entry_type": 2,
+                    },
+                }
+            )
+            hero_emitted += 1
+
+        n = await _upsert_localizations(session, rows)
+        logger.info(
+            "imported Talent/%s: %s rows (hero-tree picks=%s, skipped=%s)",
+            locale_code,
+            n,
+            hero_emitted,
+            skipped_no_name,
+        )
+        total += n
+    return total
+
+
 async def _import_encounters(
     session: AsyncSession, client: httpx.AsyncClient, build: str, missing: list[str]
 ) -> int:
@@ -403,11 +611,15 @@ async def run_full_import(session: AsyncSession, *, build: str | None = None) ->
         try:
             await _set_phase("spells")
             spells = await _import_spell_names(session, client, build, missing)
+            # Talents resolve via the spell cache so they MUST run after
+            # _import_spell_names.
+            await _set_phase("talents")
+            talents = await _import_talents(session, client, build, missing)
             await _set_phase("items")
             items = await _import_items(session, client, build, missing)
             await _set_phase("encounters")
             encounters = await _import_encounters(session, client, build, missing)
-            run.rows_imported = spells + items + encounters
+            run.rows_imported = spells + talents + items + encounters
             run.finished_at = datetime.now(UTC)
             run.phase = ""
 
@@ -415,6 +627,8 @@ async def run_full_import(session: AsyncSession, *, build: str | None = None) ->
             # one locale must have landed for each table. Otherwise wago.tools
             # was completely unreachable and we mark the run failed so the
             # admin UI doesn't claim "Aktuell" for a half-empty cache.
+            # Talents are best-effort — we don't fail the whole import if the
+            # Trait* tables are missing for a fresh build.
             if spells == 0 or items == 0 or encounters == 0:
                 run.status = WowImportStatus.failed.value
                 run.notes = (
@@ -422,7 +636,7 @@ async def run_full_import(session: AsyncSession, *, build: str | None = None) ->
                 )[:1000]
             else:
                 run.status = WowImportStatus.success.value
-                base = f"spells={spells} items={items} encounters={encounters}"
+                base = f"spells={spells} talents={talents} items={items} encounters={encounters}"
                 if missing:
                     base += (
                         f" — partial (missing locales: {', '.join(missing)}); "
@@ -476,19 +690,28 @@ async def lookup_names(
     spell_ids: Iterable[int] = (),
     item_ids: Iterable[int] = (),
     encounter_ids: Iterable[int] = (),
+    talent_ids: Iterable[int] = (),
 ) -> dict[str, str]:
     """Return ``{"spell:123": "Name", "item:42": "...", ...}`` for the given IDs.
 
     Always falls back to English when a translation is missing (e.g. brand-new
     spells that haven't been translated yet, or imports that haven't finished).
+
+    ``talent_ids`` are resolved against ``kind=talent`` rows, which are the
+    pre-resolved ``TraitNodeEntry → SpellName`` chain. Importantly we do NOT
+    fall back to ``kind=spell`` for talents — the IDs collide with old spell
+    IDs and would return confidently-wrong names ("Egg Shell" instead of
+    "Festermight"). If the talent cache is missing or has no row for a given
+    ID, we'd rather emit no name at all and let the AI know it can't cite it.
     """
     if locale not in {"en", "de"}:
         locale = "en"
     spell_ids = list({int(x) for x in spell_ids if x})
     item_ids = list({int(x) for x in item_ids if x})
     encounter_ids = list({int(x) for x in encounter_ids if x})
+    talent_ids = list({int(x) for x in talent_ids if x})
 
-    if not (spell_ids or item_ids or encounter_ids):
+    if not (spell_ids or item_ids or encounter_ids or talent_ids):
         return {}
 
     out: dict[str, str] = {}
@@ -509,6 +732,11 @@ async def lookup_names(
             clauses.append(
                 (WowLocalization.kind == "encounter")
                 & (WowLocalization.game_id.in_(encounter_ids))
+            )
+        if talent_ids:
+            clauses.append(
+                (WowLocalization.kind == "talent")
+                & (WowLocalization.game_id.in_(talent_ids))
             )
         if not clauses:
             return

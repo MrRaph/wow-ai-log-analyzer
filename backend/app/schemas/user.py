@@ -49,12 +49,22 @@ class AdminSettingsOut(BaseModel):
     allow_registration: bool
     ai_provider: str
     ai_model: str
+    # OpenAI GPT-5 / o-series reasoning depth. ``None`` (or empty) means
+    # "use OpenAI's default" — effectively no reasoning for Chat Completions.
+    # Only meaningful when ``ai_provider == "openai"``; the analyzer ignores
+    # it for anthropic / local. Mirrors the per-user BYOK ``reasoning_effort``
+    # so admins running the app-wide OpenAI key get the same lever.
+    openai_reasoning_effort: str | None = None
 
 
 class AdminSettingsUpdate(BaseModel):
     allow_registration: bool | None = None
     ai_provider: str | None = None
     ai_model: str | None = None
+    # Same valid range as ``UserAiConfig.reasoning_effort``:
+    # ``"" | "minimal" | "low" | "medium" | "high"``. Empty string and None
+    # both clear the override and fall back to OpenAI's default.
+    openai_reasoning_effort: str | None = None
 
 
 class AdminUserUpdate(BaseModel):
