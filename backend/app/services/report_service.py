@@ -271,6 +271,19 @@ async def _populate_players(
                     # by the AI to compare against top-log references and
                     # call out under-statted slots vs the percentile.
                     "stats": p.get("stats") or {},
+                    # Player's in-combat / alive time on this fight. Equals
+                    # fight duration on a kill; less than fight duration on
+                    # a wipe where the player died early. The DPS/HPS we
+                    # store is *already* normalised against this (WCL's
+                    # ``activeTime`` semantics), but the analyzer also
+                    # surfaces it raw so the AI prompt can use it as the
+                    # honest denominator for per-minute cast rates and
+                    # cooldown-usage expectations — instead of penalising a
+                    # dead player for the rotation they couldn't do.
+                    "active_time_ms": max(
+                        int(damage.get("active_time_ms") or 0),
+                        int(healing.get("active_time_ms") or 0),
+                    ),
                     # Always set ``parse_metrics`` (even when WCL has no
                     # ranking data) so the analyzer's ``has_parse_metrics``
                     # marker is True and we don't re-fetch later.
