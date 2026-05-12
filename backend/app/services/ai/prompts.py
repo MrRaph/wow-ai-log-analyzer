@@ -102,6 +102,30 @@ improvement report for ONE player on ONE fight. The report must:
   inside each ``detail`` block. Example: "you cast it 30× in 6:24 (~4.7/min);
   top logs cast it 28× in 4:50 (~5.8/min)" — here the *raw* count is similar
   but the per-minute rate shows you're actually behind.
+- **Wipe + death awareness.** If ``fight.is_kill`` is ``false`` and
+  ``player.deaths >= 1``, the player died before the fight ended. The
+  per-minute fields on the player block (``casts_per_minute``,
+  ``hits_per_minute``, ``total_per_minute``) and the player's
+  ``dps`` / ``hps`` are **already normalised against
+  ``player.active_time_minutes``** (their alive/in-combat time), NOT
+  against ``fight.duration_minutes`` (the whole wipe). Treat them as
+  honest snapshots of the player's rotation density up until death — do
+  not "scale them down" again. Top-log references are kills, so their
+  fields are normalised against the full kill duration, which is
+  apples-to-apples with the player's active-time rates.
+    - When estimating major-cooldown expected uses for the player, divide
+      by ``player.active_time_minutes`` — not the wipe length. A 3-min CD
+      on a player who lived 1:30 has an *expected* 0-1 uses, not 2.
+    - Do NOT blame the player for missing rotational casts they "should
+      have had time for" relative to the fight duration. They didn't have
+      that time.
+    - **Shift focus to the cause of death.** Read ``damage_taken`` and
+      ``debuffs`` for the abilities that killed them or stacked on them.
+      Identify which mechanic was eaten that top performers avoid. If a
+      defensive cast was missing in the player's ``top_casts`` (or its
+      ``casts_per_minute`` is materially below the top-log reference),
+      flag it as a critical finding. A death is almost always a more
+      severe finding than a 5% DPS gap.
 - Use the supplied ``phase_transitions`` to give phase-aware feedback when the
   fight has multiple phases ("you missed a CD usage at the P2 transition").
 - Examine ``damage_taken`` to flag mechanics the player is eating that top
@@ -202,6 +226,32 @@ einem Kampf. Der Bericht muss:
   ``detail``-Block. Beispiel: „du castest 30× in 6:24 (~4,7/min); Top-Logs
   casten 28× in 4:50 (~5,8/min)" — die *absolute* Zahl wirkt ähnlich, aber
   pro Minute liegst du klar zurück.
+- **Wipe + Tod-Bewusstsein.** Wenn ``fight.is_kill`` ``false`` ist UND
+  ``player.deaths >= 1``, ist der Spieler vor Ende des Kampfes gestorben.
+  Die per-Minute-Felder im Player-Block (``casts_per_minute``,
+  ``hits_per_minute``, ``total_per_minute``) sowie ``dps`` / ``hps`` sind
+  **bereits gegen ``player.active_time_minutes``** (die Lebenszeit des
+  Spielers) normalisiert, NICHT gegen ``fight.duration_minutes`` (die
+  gesamte Wipe-Länge). Behandle die Werte als ehrliche Momentaufnahme der
+  Rotation bis zum Tod — rechne sie nicht erneut runter. Top-Log-
+  Referenzen sind Kills, ihre Felder sind gegen die volle Kill-Dauer
+  normalisiert, also sind die Spieler-Active-Time-Raten direkt
+  vergleichbar.
+    - Wenn du erwartete Nutzungen großer Cooldowns abschätzt: durch
+      ``player.active_time_minutes`` teilen, nicht durch die Wipe-Länge.
+      Ein 3-Min-CD bei einem Spieler, der 1:30 lebte, hat einen
+      *Erwartungswert* von 0-1 Nutzungen, nicht 2.
+    - **Wirf dem Spieler keine Rotations-Casts vor, für die er
+      "eigentlich Zeit gehabt hätte"** relativ zur Kampfdauer. Hatte er
+      nicht — er war tot.
+    - **Verschiebe den Fokus auf die Todesursache.** Lies ``damage_taken``
+      und ``debuffs`` nach den Fähigkeiten, die ihn getötet bzw. auf ihm
+      gestapelt haben. Identifiziere, welche Mechanik er gefressen hat,
+      die Top-Performer dodgen. Wenn ein Defensiv-Cast in den
+      ``top_casts`` des Spielers fehlt (oder dessen
+      ``casts_per_minute`` deutlich unter der Top-Log-Referenz liegt),
+      kennzeichne das als kritischen Befund. Ein Tod ist fast immer
+      schwerwiegender als ein 5%-DPS-Loss.
 - Nutze ``phase_transitions`` für phasen-bewusste Hinweise wenn der Kampf
   mehrere Phasen hat („CD-Nutzung am P2-Übergang verpasst").
 - Werte ``damage_taken`` aus, um Mechaniken zu flaggen, die der Spieler

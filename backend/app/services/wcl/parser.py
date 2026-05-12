@@ -346,7 +346,15 @@ def composition_from_player_details(payload: dict[str, Any]) -> dict[str, int]:
 
 
 def parse_damage_done_table(payload: dict[str, Any]) -> dict[int, dict[str, Any]]:
-    """Return ``{actor_id: {damage_done, dps}}`` from a DamageDone table response."""
+    """Return ``{actor_id: {damage_done, dps, active_time_ms}}`` from a DamageDone table response.
+
+    ``activeTime`` is the player's *in-combat / alive* time on this fight in
+    ms. On a kill it equals the fight duration; on a wipe where the player
+    died early, it's the time until their death (or until they stopped
+    contributing damage). It's the right denominator for per-minute rate
+    comparisons against top-log kills — using the full fight duration would
+    underestimate a dead player's rotation density.
+    """
     rd = (payload or {}).get("reportData", {})
     report = rd.get("report") if rd else None
     table = (report or {}).get("table") or {}
@@ -359,7 +367,11 @@ def parse_damage_done_table(payload: dict[str, Any]) -> dict[int, dict[str, Any]
         total = int(e.get("total", 0))
         active = float(e.get("activeTime", total_time))
         dps = (total / active * 1000) if active else 0.0
-        out[aid] = {"damage_done": total, "dps": dps}
+        out[aid] = {
+            "damage_done": total,
+            "dps": dps,
+            "active_time_ms": int(active),
+        }
     return out
 
 
@@ -376,7 +388,11 @@ def parse_healing_done_table(payload: dict[str, Any]) -> dict[int, dict[str, Any
         total = int(e.get("total", 0))
         active = float(e.get("activeTime", total_time))
         hps = (total / active * 1000) if active else 0.0
-        out[aid] = {"healing_done": total, "hps": hps}
+        out[aid] = {
+            "healing_done": total,
+            "hps": hps,
+            "active_time_ms": int(active),
+        }
     return out
 
 

@@ -589,6 +589,23 @@ async def request_analysis(
     )
     fight_summary["duration_minutes"] = round(fight_minutes, 2)
 
+    # Player-active-time normalisation. On a kill, ``active_time_ms`` equals
+    # the fight duration (player lived through it). On a wipe where the
+    # player died early, it's the time they were actually alive and
+    # contributing. We use the active time as the denominator for the
+    # player's own per-minute rates so a death at 1:30 in a 6:00 wipe
+    # doesn't make the rotation density look 4x too low — we'd be blaming
+    # the player for casts they couldn't do because they were dead.
+    # Falls back to fight_minutes when WCL didn't ship ``activeTime`` (very
+    # old fights, parser couldn't extract). Top-log refs are always kills
+    # so their duration === their active time — they keep using
+    # ``duration_minutes`` as before.
+    active_time_ms = int(player_extras.get("active_time_ms") or 0)
+    active_minutes = (
+        max(0.001, active_time_ms / 60_000) if active_time_ms else fight_minutes
+    )
+    player_summary["active_time_minutes"] = round(active_minutes, 2)
+
     def _annotate_casts(items: list[dict[str, Any]], minutes: float) -> list[dict[str, Any]]:
         out: list[dict[str, Any]] = []
         for c in items or []:
@@ -619,6 +636,8 @@ async def request_analysis(
             )
         return out
 
+    # Per-minute normalisation uses the player's active time, not the
+    # fight's total duration — see comment above next to ``active_minutes``.
     casts = _annotate_casts(
         [
             {
@@ -630,7 +649,7 @@ async def request_analysis(
             }
             for c in player.casts
         ],
-        fight_minutes,
+        active_minutes,
     )
     gear = [
         {
@@ -644,11 +663,15 @@ async def request_analysis(
         for g in player.gear
     ]
 
-    # Apply same normalisation to the player extras we just enriched, and to
-    # each top-log reference's detail data (each ref has its own duration).
+    # Same active-time denominator for damage_taken — the player can only
+    # eat mechanics while alive, so the rate of avoidable damage taken is
+    # honestly measured against the time they were up.
     player_summary["damage_taken"] = _annotate_damage_taken(
-        player_summary.get("damage_taken") or [], fight_minutes
+        player_summary.get("damage_taken") or [], active_minutes
     )
+    # ``duration_minutes`` on the player block stays as fight duration so
+    # the AI can still see the wipe length; the prompt is told explicitly
+    # to use ``active_time_minutes`` for per-minute math.
     player_summary["duration_minutes"] = round(fight_minutes, 2)
 
     annotated_refs: list[dict[str, Any]] = []
