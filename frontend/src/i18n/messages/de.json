@@ -48,6 +48,20 @@
     "captchaMissing": "Bitte bestätige zuerst das Captcha."
   },
   "analyze": {
+    "share": {
+      "title": "Diese Analyse teilen",
+      "offHint": "Privat — nur du kannst diese Analyse sehen.",
+      "onHint": "Öffentlich — jeder mit dem Link kann diese Analyse lesen.",
+      "enable": "Link generieren",
+      "disable": "Teilen beenden",
+      "copy": "Kopieren",
+      "copied": "Kopiert",
+      "copyFailed": "In die Zwischenablage kopieren fehlgeschlagen — bitte Link manuell auswählen.",
+      "urlLabel": "Öffentliche Share-URL",
+      "publicBanner": "Geteilte Analyse",
+      "publicNotFoundTitle": "Analyse nicht gefunden",
+      "publicNotFoundBody": "Dieser Share-Link wurde widerrufen oder hat nie existiert."
+    },
     "title": "Warcraft-Logs-Bericht analysieren",
     "subtitle": "Füge einen WCL-Link oder Report-Code ein. Wir cachen den Bericht und lassen dich pro Kampf und Spieler eine AI-Analyse anstoßen.",
     "input": "https://www.warcraftlogs.com/reports/...",

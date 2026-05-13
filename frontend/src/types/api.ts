@@ -275,6 +275,42 @@ export interface Analysis {
   completion_tokens: number;
   created_at: string;
   updated_at: string;
+  /**
+   * Raw share token when the owner has enabled public sharing. ``null``
+   * means the analysis is private. Only ever populated on authenticated
+   * reads — the anonymous ``GET /shared-analyses/{token}`` endpoint
+   * never echoes it back (the viewer already has it in the URL).
+   */
+  share_token: string | null;
+}
+
+/**
+ * Anonymous-read view of a single analysis served by
+ * ``GET /shared-analyses/{token}``. Excludes ``share_token`` itself,
+ * raw foreign-key UUIDs, token counts and the ``error`` blob — only
+ * the structured findings + the public WCL context for rendering.
+ */
+export interface AnalysisPublicOut {
+  id: string;
+  status: "pending" | "running" | "succeeded" | "failed";
+  locale: string;
+  provider: string;
+  model: string;
+  summary: string;
+  structured: AnalysisStructured | Record<string, never>;
+  created_at: string;
+  updated_at: string;
+  report_code: string;
+  fight_name: string;
+  fight_name_localized: string | null;
+  encounter_id: number | null;
+  is_kill: boolean;
+  duration_ms: number;
+  boss_percentage: number | null;
+  player_name: string;
+  player_server: string;
+  player_class: string;
+  player_spec: string;
 }
 
 export interface PaginatedAnalyses {
