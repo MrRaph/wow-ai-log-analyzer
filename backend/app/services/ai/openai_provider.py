@@ -11,6 +11,7 @@ from __future__ import annotations
 import logging
 from typing import Any, Literal
 
+import httpx
 from openai import AsyncOpenAI
 
 from app.config import settings
@@ -26,6 +27,14 @@ Mode = Literal["openai", "local"]
 # own fallback (``os.environ["OPENAI_BASE_URL"]`` then the default) breaks
 # when the env var is set to an empty string — see the constructor below.
 _DEFAULT_OPENAI_BASE_URL = "https://api.openai.com/v1"
+
+# 30 min HTTP read timeout. Cloud OpenAI typically replies in 1-3 min, but
+# BYOK users on a self-hosted Ollama / llama.cpp endpoint with consumer
+# hardware (no GPU or partial offload) can take 15-25 min to generate.
+# Connect/write/pool stay tight so we still fail fast on a dead endpoint.
+# Matches the arq ``run_analysis_task`` job_timeout so neither layer cuts
+# the other off mid-generation.
+_AI_HTTP_TIMEOUT = httpx.Timeout(connect=10.0, read=30 * 60, write=60.0, pool=15.0)
 
 
 class OpenAiCompatibleProvider:
@@ -63,7 +72,9 @@ class OpenAiCompatibleProvider:
                 if mode == "openai"
                 else (cleaned_byok or None)
             )
-            self._client = AsyncOpenAI(api_key=api_key, base_url=client_base_url)
+            self._client = AsyncOpenAI(
+                api_key=api_key, base_url=client_base_url, timeout=_AI_HTTP_TIMEOUT
+            )
             self._default_model = model or (
                 settings.ai_model if mode == "openai" else settings.local_ai_model
             )
@@ -83,12 +94,14 @@ class OpenAiCompatibleProvider:
             self._client = AsyncOpenAI(
                 api_key=settings.openai_api_key,
                 base_url=cleaned or _DEFAULT_OPENAI_BASE_URL,
+                timeout=_AI_HTTP_TIMEOUT,
             )
             self._default_model = settings.ai_model
         else:
             self._client = AsyncOpenAI(
                 api_key=settings.local_ai_api_key or "dummy",
                 base_url=settings.local_ai_base_url,
+                timeout=_AI_HTTP_TIMEOUT,
             )
             self._default_model = settings.local_ai_model
 

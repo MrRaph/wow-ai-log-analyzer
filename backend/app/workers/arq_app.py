@@ -161,7 +161,15 @@ class WorkerSettings:
         refresh_all_top_logs,
         refresh_wow_data,
         import_report_task,
-        run_analysis_task,
+        # 30 min — cloud Anthropic/OpenAI typically return in 1-3 min, but
+        # BYOK users with a self-hosted Ollama / llama.cpp on consumer
+        # hardware (no GPU or partial offload) can legitimately take
+        # 15-25 min for a single analysis. The 10 min default would cut
+        # those runs off mid-generation. The HTTP client in
+        # ``OpenAiCompatibleProvider`` is bumped to the same ceiling so
+        # both layers cap simultaneously instead of one fighting the
+        # other.
+        func(run_analysis_task, timeout=30 * 60),
         # 35 min — 39 specs × ~17 s WCL latency easily blows past the
         # 10 min default for fresh-cache seeds.
         func(seed_encounter_task, timeout=35 * 60),
