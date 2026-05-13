@@ -246,6 +246,10 @@ async def _fetch_top_log_references(
                     "buffs": detail.get("buffs") or [],
                     "debuffs": detail.get("debuffs") or [],
                     "damage_taken": detail.get("damage_taken") or [],
+                    # Boss-cast cycle timeline of the reference kill, same
+                    # shape as the user fight's ``fight.boss_casts`` so the
+                    # AI can compare cycle alignment directly.
+                    "boss_casts": detail.get("boss_casts") or [],
                 },
             }
         )
@@ -446,6 +450,12 @@ async def _collect_localized_names(
     for g in gear:
         if g.get("item_id"):
             item_ids.add(int(g["item_id"]))
+    # Boss-cast timeline IDs are spell IDs (the boss is casting actual
+    # spells), so they belong under kind=spell. Same goes for the
+    # reference-detail boss_casts further down.
+    for entry in fight_summary.get("boss_casts") or []:
+        if entry.get("ability_id"):
+            spell_ids.add(int(entry["ability_id"]))
 
     for ref in references:
         detail = ref.get("detail") or {}
@@ -465,6 +475,9 @@ async def _collect_localized_names(
         for tid in detail.get("talent_ids") or []:
             if tid:
                 talent_ids.add(int(tid))
+        for entry in detail.get("boss_casts") or []:
+            if entry.get("ability_id"):
+                spell_ids.add(int(entry["ability_id"]))
 
     names = await lookup_names(
         session,
@@ -579,6 +592,12 @@ async def request_analysis(
         "duration_ms": fight.duration_ms,
         "boss_percentage": fight.boss_percentage,
         "phase_transitions": fight_extras.get("phase_transitions") or [],
+        # Per-ability boss-cast timeline (fight-relative seconds since
+        # fight start). One entry per top-N boss ability with the cast
+        # count and a sample of timestamps. Lets the AI infer the cycle
+        # period of each ability and judge whether the player's defensive
+        # cooldown frequency matched the boss-pressure cadence.
+        "boss_casts": fight_extras.get("boss_casts") or [],
     }
     player_extras = player.extras or {}
     parse_metrics = player_extras.get("parse_metrics") or {}

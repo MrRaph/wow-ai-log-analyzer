@@ -46,7 +46,8 @@ def parse_report_overview(payload: dict[str, Any]) -> dict[str, Any]:
     fights_in = report.get("fights") or []
     fights = []
     for f in fights_in:
-        start_ms = report["startTime"] + f.get("startTime", 0)
+        wcl_fight_start_offset_ms = int(f.get("startTime", 0))
+        start_ms = report["startTime"] + wcl_fight_start_offset_ms
         end_ms = report["startTime"] + f.get("endTime", f.get("startTime", 0))
         # Phase transitions are reported in ms relative to fight start; we keep
         # them like that for compactness and let the AI/UI normalise as needed.
@@ -66,7 +67,14 @@ def parse_report_overview(payload: dict[str, Any]) -> dict[str, Any]:
                 "boss_percentage": f.get("bossPercentage"),
                 "duration_ms": max(0, int(end_ms - start_ms)),
                 "start_time": _ms_to_dt(start_ms),
-                "extras": {"phase_transitions": phase_transitions},
+                "extras": {
+                    "phase_transitions": phase_transitions,
+                    # WCL's report.events ships timestamps in this same
+                    # report-relative offset space, so the import flow uses
+                    # this value to convert boss-cast timestamps into
+                    # fight-relative seconds. Keep it cheap to fetch later.
+                    "wcl_fight_start_ms": wcl_fight_start_offset_ms,
+                },
             }
         )
     return {
@@ -523,6 +531,107 @@ def parse_aura_table(payload: dict[str, Any]) -> list[dict[str, Any]]:
         )
     out.sort(key=lambda e: e["total_uptime_ms"], reverse=True)
     return out[:25]
+
+
+def parse_enemy_cast_events_page(payload: dict[str, Any]) -> tuple[list[dict[str, Any]], float | None]:
+    """Pull one page of enemy ``Casts`` events out of a ``report.events`` response.
+
+    Returns ``(events, next_page_timestamp)``. ``data`` ships as either a
+    JSON string or an already-decoded list depending on WCL's mood; we
+    handle both. Only ``type='cast'`` events are kept (``begincast`` is
+    the start-of-cast signal — for boss-pressure analysis we want the
+    actual hit moment, not the wind-up).
+    """
+    import json as _json
+
+    rd = (payload or {}).get("reportData", {})
+    report = rd.get("report") if rd else None
+    events_blob = (report or {}).get("events") or {}
+    next_ts = events_blob.get("nextPageTimestamp")
+    raw = events_blob.get("data") or []
+    if isinstance(raw, str):
+        try:
+            raw = _json.loads(raw)
+        except (ValueError, TypeError):
+            raw = []
+    if not isinstance(raw, list):
+        raw = []
+    out: list[dict[str, Any]] = []
+    for ev in raw:
+        if not isinstance(ev, dict):
+            continue
+        if ev.get("type") != "cast":
+            continue
+        try:
+            ability_id = int(ev.get("abilityGameID") or 0)
+            ts = int(ev.get("timestamp") or 0)
+        except (TypeError, ValueError):
+            continue
+        if not ability_id:
+            continue
+        out.append({"ability_id": ability_id, "timestamp_ms": ts})
+    return out, (float(next_ts) if next_ts is not None else None)
+
+
+def aggregate_boss_casts(
+    events: list[dict[str, Any]],
+    *,
+    fight_start_ms: int,
+    top_n_abilities: int = 6,
+    max_samples_per_ability: int = 10,
+) -> list[dict[str, Any]]:
+    """Collapse a flat list of cast events into a compact per-ability summary.
+
+    Output shape (one entry per ability, sorted by cast count descending):
+
+    ``{ability_id, count, cast_seconds: [t0, t1, ...]}``
+
+    ``cast_seconds`` lists *fight-relative* seconds since fight start
+    (negative values from pre-pull buffs are clamped to 0) so the AI can
+    eyeball the cycle period without doing the conversion itself.
+
+    We cap the list to ``max_samples_per_ability`` per ability and
+    ``top_n_abilities`` total — that's enough to see the pattern (4-5
+    samples already reveal the cycle) without exploding the prompt for
+    long pull-heavy fights.
+    """
+    if not events:
+        return []
+    by_id: dict[int, list[int]] = {}
+    for ev in events:
+        aid = int(ev.get("ability_id") or 0)
+        ts = int(ev.get("timestamp_ms") or 0)
+        if not aid:
+            continue
+        by_id.setdefault(aid, []).append(ts)
+    ranked = sorted(
+        by_id.items(), key=lambda kv: (-len(kv[1]), kv[0])
+    )[:top_n_abilities]
+    out: list[dict[str, Any]] = []
+    for aid, ts_list in ranked:
+        ts_list.sort()
+        # Sample evenly across the timeline. Anchor on the first AND last
+        # cast so the AI can derive the true cycle period via
+        # ``(max-min)/(count-1)`` on the sample — if we used a plain
+        # ``int(i*step)`` scheme the tail would be cut off (e.g. for 92
+        # entries we'd top out at index 81, throwing off any cycle math
+        # using ``count``).
+        if len(ts_list) > max_samples_per_ability:
+            n = max_samples_per_ability
+            ts_list = [
+                ts_list[round(i * (len(ts_list) - 1) / (n - 1))] for i in range(n)
+            ]
+        cast_seconds = [
+            round(max(0, t - fight_start_ms) / 1000, 1) for t in ts_list
+        ]
+        out.append(
+            {
+                "ability_id": aid,
+                "count": len(by_id[aid]),
+                "cast_seconds": cast_seconds,
+            }
+        )
+    return out
 
 
 def parse_damage_taken_table(payload: dict[str, Any]) -> list[dict[str, Any]]:

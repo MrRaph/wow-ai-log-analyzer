@@ -53,6 +53,10 @@ query ReportPlayerDetails($code: String!, $fightIDs: [Int]!) {
   reportData {
     report(code: $code) {
       playerDetails(fightIDs: $fightIDs, includeCombatantInfo: true)
+      # ``startTime`` here is ms relative to the report's start. We need it
+      # in top-log detail fetches to convert event timestamps (also report-
+      # relative) into fight-relative seconds for boss-cast timelines.
+      fights(fightIDs: $fightIDs) { id startTime endTime }
     }
   }
 }
@@ -116,6 +120,37 @@ query ReportDamageTaken(
   }
 }
 """
+
+# Per-cast event stream for enemy actors only — used to extract boss-cast
+# *timestamps* (not just aggregated counts like ``REPORT_CASTS`` for a
+# player). ``report.events`` is paginated: each response carries up to
+# ~300 events plus a ``nextPageTimestamp`` we have to feed back as
+# ``startTime`` until it comes back null. ``data`` is shipped either as
+# a JSON-encoded string or as an already-decoded list (WCL has been
+# inconsistent), the parser tolerates both.
+REPORT_ENEMY_CAST_EVENTS = """
+query ReportEnemyCastEvents(
+  $code: String!,
+  $fightIDs: [Int]!,
+  $startTime: Float
+) {
+  reportData {
+    report(code: $code) {
+      events(
+        dataType: Casts,
+        hostilityType: Enemies,
+        fightIDs: $fightIDs,
+        startTime: $startTime,
+        limit: 1000
+      ) {
+        data
+        nextPageTimestamp
+      }
+    }
+  }
+}
+"""
+
 
 # Per-fight player rankings (parse percentile + ilvl-bracket "best" percentile)
 # for every player in the report. Returns a JSON blob with one entry per fight,

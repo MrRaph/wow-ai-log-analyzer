@@ -128,6 +128,25 @@ improvement report for ONE player on ONE fight. The report must:
       severe finding than a 5% DPS gap.
 - Use the supplied ``phase_transitions`` to give phase-aware feedback when the
   fight has multiple phases ("you missed a CD usage at the P2 transition").
+- **Use ``fight.boss_casts`` (and the matching ``detail.boss_casts`` on
+  each top-log reference) to align the player's defensive cooldowns with
+  actual boss-pressure cycles.** Each entry is one boss ability with
+  ``ability_id``, ``count`` (total casts in the fight) and
+  ``cast_seconds`` (a sample of cast timestamps in fight-relative
+  seconds). To estimate the cycle period: ``round((max-min)/(count-1))``
+  on ``cast_seconds`` ≈ seconds between hits. Then compare to the
+  player's defensive cast count (in ``top_casts``):
+    - Boss ability with cycle ≈ 25 s on a 6:00 fight = ~14 expected hits.
+    - Player's 60-s-CD defensive used 3× over the same window = covers
+      ~5 of those 14. That's a concrete shortfall you can quote.
+    - If the top-log reference's ``boss_casts`` for the same ability
+      shows the same cycle but their defensive cast count matches every
+      *other* hit (≈ 7 uses), call out the gap explicitly: "boss did X
+      ~14×, top log mitigated every other one (7 defensives), you used
+      it 3× → 4 missed mitigation windows".
+  Quote the boss ability by its localised name from ``localized_names``
+  (under the ``spell:<id>`` key — boss casts are real spells), never by
+  raw id.
 - Examine ``damage_taken`` to flag mechanics the player is eating that top
   performers avoid. Do not invent boss mechanics — only reference abilities
   that are actually in the data.
@@ -254,6 +273,24 @@ einem Kampf. Der Bericht muss:
       schwerwiegender als ein 5%-DPS-Loss.
 - Nutze ``phase_transitions`` für phasen-bewusste Hinweise wenn der Kampf
   mehrere Phasen hat („CD-Nutzung am P2-Übergang verpasst").
+- **Nutze ``fight.boss_casts`` (und das passende ``detail.boss_casts``
+  jeder Top-Log-Referenz), um defensive Cooldowns des Spielers gegen die
+  tatsächlichen Boss-Druck-Zyklen abzugleichen.** Jeder Eintrag ist eine
+  Boss-Fähigkeit mit ``ability_id``, ``count`` (Gesamt-Casts im Fight)
+  und ``cast_seconds`` (Stichprobe der Cast-Zeitpunkte in Fight-Sekunden).
+  Zyklus-Periode schätzen via ``round((max-min)/(count-1))`` auf
+  ``cast_seconds`` ≈ Sekunden zwischen Treffern. Dann mit der Defensiv-
+  Cast-Zahl aus ``top_casts`` vergleichen:
+    - Boss-Ability mit ~25 s Zyklus auf 6:00 Fight = ~14 erwartete Hits.
+    - 60-s-CD Defensive 3× genutzt → deckt ~5 von 14 ab. Konkrete Lücke.
+    - Wenn die Top-Log-Referenz für dieselbe Ability den gleichen Zyklus
+      zeigt, aber jeden *zweiten* Hit mitigiert (≈ 7 Defensives), das
+      Gap explizit benennen: „Boss castet X ~14×, Top-Log mitigiert
+      jeden zweiten Hit (7 Defensives), du 3× → 4 verpasste
+      Mitigations-Fenster".
+  Zitiere die Boss-Ability über ihren lokalisierten Namen aus
+  ``localized_names`` (unter dem ``spell:<id>``-Key — Boss-Casts sind
+  echte Spells), nie über die rohe ID.
 - Werte ``damage_taken`` aus, um Mechaniken zu flaggen, die der Spieler
   frisst, die Top-Performer aber dodgen. Erfinde keine Boss-Mechaniken —
   beziehe dich nur auf Fähigkeiten, die tatsächlich in den Daten stehen.
