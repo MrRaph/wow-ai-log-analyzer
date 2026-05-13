@@ -259,7 +259,7 @@
       "providerOpenaiCompatible": "OpenAI-compatible (self-hosted)",
       "providerAnthropicHint": "Cloud Claude. Get a key at https://console.anthropic.com.",
       "providerOpenaiHint": "Cloud OpenAI. Get a key at https://platform.openai.com. Optional: base URL for Azure OpenAI or compatible cloud proxies.",
-      "providerCompatibleHint": "Any /v1-compatible server: Ollama, LM Studio, AnythingLLM, open-webui, vLLM, llama.cpp etc. Needs base URL + model; API key often optional/dummy.",
+      "providerCompatibleHint": "Any /v1-compatible server: Ollama, LM Studio, AnythingLLM, open-webui, vLLM, llama.cpp etc. Needs base URL + model; API key often optional/dummy. The reasoning-effort dropdown is hidden here — self-hosted endpoints don't honour the OpenAI parameter; whether a model 'thinks' internally is entirely up to its own architecture.",
       "baseUrl": "Base URL",
       "baseUrlOpenaiHint": "Leave empty for OpenAI direct. For Azure OpenAI or proxies: full URL incl. /v1.",
       "baseUrlCompatibleHint": "Full URL incl. /v1, e.g. http://myserver:11434/v1 (Ollama) or https://anythingllm.lan/api/v1.",

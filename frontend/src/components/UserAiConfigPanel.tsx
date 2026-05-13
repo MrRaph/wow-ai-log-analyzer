@@ -260,7 +260,15 @@ export function UserAiConfigPanel() {
           />
         </div>
 
-        {providerType !== "anthropic" && (
+        {providerType === "openai" && (
+          // Only OpenAI cloud has a documented ``reasoning_effort`` API
+          // parameter (GPT-5 / o-series). Anthropic does not expose one,
+          // and self-hosted ``openai_compatible`` endpoints (Ollama,
+          // vLLM, LM Studio, …) don't either — even when the underlying
+          // model has its own reasoning capability, our request shape
+          // here would not engage it. Hiding the dropdown for those
+          // providers avoids the UX trap of "I picked high and nothing
+          // changed".
           <div>
             <Label>{t("profile.aiCfg.reasoningEffort")}</Label>
             <Select
