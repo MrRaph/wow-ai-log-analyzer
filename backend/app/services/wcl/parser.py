@@ -44,21 +44,71 @@ def parse_report_overview(payload: dict[str, Any]) -> dict[str, Any]:
     zone = report.get("zone") or {}
     region = report.get("region") or {}
     fights_in = report.get("fights") or []
+
+    # Encounter-level phase metadata: ``{encounter_id: {phase_id: {name, is_intermission}}}``.
+    # WCL ships this in ``Report.phases`` as a list of (encounterID, phases[])
+    # entries. We zip it onto each fight's transitions below so the AI gets
+    # human-readable labels instead of bare numeric IDs.
+    phase_meta: dict[int, dict[int, dict[str, Any]]] = {}
+    for pm in (report.get("phases") or []) if isinstance(report.get("phases"), list) else []:
+        try:
+            eid = int(pm.get("encounterID", 0))
+        except (TypeError, ValueError):
+            continue
+        if not eid:
+            continue
+        slot: dict[int, dict[str, Any]] = {}
+        for ph in pm.get("phases") or []:
+            try:
+                pid = int(ph.get("id", 0))
+            except (TypeError, ValueError):
+                continue
+            slot[pid] = {
+                "name": str(ph.get("name") or "").strip(),
+                "is_intermission": bool(ph.get("isIntermission")),
+            }
+        if slot:
+            phase_meta[eid] = slot
+
     fights = []
     for f in fights_in:
-        start_ms = report["startTime"] + f.get("startTime", 0)
-        end_ms = report["startTime"] + f.get("endTime", f.get("startTime", 0))
-        # Phase transitions are reported in ms relative to fight start; we keep
-        # them like that for compactness and let the AI/UI normalise as needed.
-        phase_transitions = [
-            {"id": int(p.get("id", 0)), "start_ms": int(p.get("startTime", 0))}
-            for p in (f.get("phaseTransitions") or [])
-            if p
-        ]
+        fight_start_offset_ms = int(f.get("startTime", 0))
+        start_ms = report["startTime"] + fight_start_offset_ms
+        end_ms = report["startTime"] + f.get("endTime", fight_start_offset_ms)
+        enc_id = int(f["encounterID"]) if f.get("encounterID") else None
+        meta_for_fight = phase_meta.get(enc_id) if enc_id is not None else None
+        # IMPORTANT: WCL's ``phaseTransition.startTime`` is ms *from the
+        # report's startTime*, NOT from the fight's startTime — the old
+        # comment claiming otherwise was wrong. Without normalisation the
+        # AI saw values like 5.7M ms on a 340k-ms fight and (correctly)
+        # called the data unusable. Subtract the fight's own offset and
+        # convert to seconds since fight-start (more compact and directly
+        # comparable to the ``duration_minutes`` we already ship).
+        phase_transitions: list[dict[str, Any]] = []
+        for p in f.get("phaseTransitions") or []:
+            if not p:
+                continue
+            try:
+                pid = int(p.get("id", 0))
+                raw_ms = int(p.get("startTime", 0))
+            except (TypeError, ValueError):
+                continue
+            offset_ms = max(0, raw_ms - fight_start_offset_ms)
+            entry: dict[str, Any] = {
+                "id": pid,
+                "start_seconds": round(offset_ms / 1000, 1),
+            }
+            if meta_for_fight is not None:
+                m = meta_for_fight.get(pid)
+                if m and m.get("name"):
+                    entry["name"] = m["name"]
+                if m and m.get("is_intermission"):
+                    entry["is_intermission"] = True
+            phase_transitions.append(entry)
         fights.append(
             {
                 "fight_id": int(f["id"]),
-                "encounter_id": int(f["encounterID"]) if f.get("encounterID") else None,
+                "encounter_id": enc_id,
                 "name": f.get("name") or "",
                 "difficulty": f.get("difficulty"),
                 "keystone_level": f.get("keystoneLevel"),
