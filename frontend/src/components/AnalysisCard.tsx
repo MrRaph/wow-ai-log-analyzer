@@ -148,7 +148,15 @@ export function AnalysisCard({ analysis, locale }: Props) {
             </h3>
             <ul className="list-disc pl-5 text-sm text-zinc-200">
               {s.strengths.map((line, i) => (
-                <li key={i}>{line}</li>
+                <li key={i}>
+                  <ProseWithLinks
+                    text={line}
+                    locale={locale}
+                    nameMap={nameMap}
+                    talentSpellIds={talentSpellIds}
+                    className=""
+                  />
+                </li>
               ))}
             </ul>
           </div>
@@ -183,7 +191,15 @@ export function AnalysisCard({ analysis, locale }: Props) {
                   </span>
                 )}
               </div>
-              <h4 className="mt-2 text-base font-semibold text-zinc-100">{f.title}</h4>
+              <h4 className="mt-2 text-base font-semibold text-zinc-100">
+                <ProseWithLinks
+                  text={f.title}
+                  locale={locale}
+                  nameMap={nameMap}
+                  talentSpellIds={talentSpellIds}
+                  className=""
+                />
+              </h4>
               <ProseWithLinks
                 text={f.detail}
                 locale={locale}
