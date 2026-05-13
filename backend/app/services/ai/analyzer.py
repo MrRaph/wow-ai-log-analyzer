@@ -224,6 +224,18 @@ async def _fetch_top_log_references(
         .limit(limit)
     )
     rows = (await session.execute(stmt)).scalars().all()
+    # Drop rows whose detail blob was written by an older code shape —
+    # they'd feed the AI a payload missing fields (e.g. boss_casts on
+    # pre-v0.3.0 detail). When all rows are stale this returns ``[]``,
+    # which makes the caller fall through to ``_ensure_references`` →
+    # incremental refresh → fresh detail with the current version stamp.
+    from app.services.top_logs_service import TOP_LOG_DETAIL_VERSION as _DV
+
+    rows = [
+        r
+        for r in rows
+        if int((r.detail_payload or {}).get("_v") or 0) >= _DV
+    ]
     out: list[dict[str, Any]] = []
     for r in rows:
         detail = r.detail_payload or {}
@@ -633,6 +645,67 @@ async def request_analysis(
     ).scalar_one_or_none()
     if not report or report.id != fight.report_id:
         raise NotFoundError("Report mismatch.")
+
+    # ----- Auto-refresh stale data before running the analysis ---------------
+    # When the code shipped a new field since this report (or its cached
+    # top-log references) was imported, the analyser would otherwise read
+    # missing fields and the AI prompt would silently lose features.
+    # ``REPORT_DATA_VERSION`` / ``TOP_LOG_DETAIL_VERSION`` are bumped by the
+    # importer code when the shape changes; we compare against the stored
+    # ``_v`` stamp and re-fetch when behind. Failures are logged but never
+    # blocking — we proceed with whatever data we have, the AI degrades
+    # gracefully on missing fields.
+    from app.services.report_service import (
+        REPORT_DATA_VERSION as _RDV,
+        report_data_is_current,
+        run_report_import,
+    )
+
+    if not await report_data_is_current(session, report.id):
+        logger.info(
+            "report %s data older than v%d — auto-refreshing before analysis",
+            report.id,
+            _RDV,
+        )
+        try:
+            async with WclClient() as wcl:
+                await run_report_import(session, report_id=report.id, wcl_client=wcl)
+            await session.commit()
+            # Re-load fight + player after the import wiped + re-inserted them.
+            fight = (
+                await session.execute(
+                    select(ReportFight).where(
+                        ReportFight.report_id == report.id,
+                        ReportFight.fight_id == fight.fight_id,
+                    )
+                )
+            ).scalar_one_or_none()
+            player = (
+                await session.execute(
+                    select(ReportPlayer)
+                    .where(
+                        ReportPlayer.fight_id == fight.id if fight else False,
+                        ReportPlayer.actor_id == player.actor_id,
+                    )
+                    .options(
+                        selectinload(ReportPlayer.casts),
+                        selectinload(ReportPlayer.gear),
+                    )
+                )
+            ).scalar_one_or_none()
+            if not fight or not player:
+                raise UpstreamError(
+                    "Report data was refreshed but the original fight/player "
+                    "rows could not be re-located — the underlying WCL log "
+                    "may have changed."
+                )
+        except UpstreamError:
+            raise
+        except Exception:  # noqa: BLE001
+            logger.exception(
+                "Auto-refresh of report %s failed — continuing with stale data",
+                report.id,
+            )
 
     role_focus = "healer" if player.role == "healer" else ("tank" if player.role == "tank" else "dps")
 
