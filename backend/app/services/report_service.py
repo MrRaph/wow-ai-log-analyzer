@@ -4,7 +4,7 @@ from __future__ import annotations
 import logging
 from typing import Any
 
-from sqlalchemy import select
+from sqlalchemy import delete, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
@@ -37,6 +37,23 @@ from app.services.wcl.queries import (
 )
 
 logger = logging.getLogger(__name__)
+
+# Bumped whenever the shape of ``ReportFight.extras`` / ``ReportPlayer.extras``
+# / ``ReportPlayerGear`` / ``ReportPlayerCast`` changes in a way the AI prompt
+# or analyser needs. Stored verbatim into ``extras['_v']`` on every fresh
+# import; ``run_report_import`` re-imports a report when any fight's stored
+# ``_v`` is below this value. Missing ``_v`` is treated as version 0
+# (= ancient), which forces a refresh.
+#
+# History:
+#   v1: initial shape (basic per-fight/per-player rollups).
+#   v2 (v0.2.0): added talent_ids/stats/active_time_ms in player.extras,
+#                gear rows in report_player_gear, talents_loadout JSONB.
+#   v3 (v0.3.0): added wcl_fight_start_ms + fight-relative-second
+#                phase_transitions + boss_casts on fight.extras;
+#                mana_recovery is lazy-fetched at analysis time so it
+#                doesn't gate this version.
+REPORT_DATA_VERSION = 3
 
 
 async def fetch_boss_cast_timeline(
@@ -114,6 +131,28 @@ async def create_import_skeleton(
     return report
 
 
+async def report_data_is_current(session: AsyncSession, report_id: Any) -> bool:
+    """Return ``True`` iff every fight on the report carries the current
+    ``REPORT_DATA_VERSION`` stamp. Empty (no fights) → ``False`` because
+    a freshly-skeletoned but never-imported report counts as not current.
+
+    Missing ``_v`` (older code's writes) is treated as version 0, which is
+    always below the current constant — so legacy data automatically
+    triggers a refresh on the next analysis without any per-row migration.
+    """
+    fights = (
+        await session.execute(
+            select(ReportFight.extras).where(ReportFight.report_id == report_id)
+        )
+    ).all()
+    if not fights:
+        return False
+    return all(
+        int((extras or {}).get("_v") or 0) >= REPORT_DATA_VERSION
+        for (extras,) in fights
+    )
+
+
 async def run_report_import(
     session: AsyncSession,
     *,
@@ -124,7 +163,11 @@ async def run_report_import(
 
     Drives ``import_status``: ``importing`` → ``ready`` (or ``failed`` on
     exception). Idempotent — calling on a ``ready`` row that already has
-    fights does nothing besides refreshing the status.
+    fights does nothing besides refreshing the status, UNLESS the stored
+    data was written by an older code version (different
+    ``REPORT_DATA_VERSION``). In that case the existing fights are wiped
+    and a full re-import runs so the analyser can rely on the current
+    fight/player extras shape.
     """
     report = (
         await session.execute(select(Report).where(Report.id == report_id))
@@ -132,7 +175,22 @@ async def run_report_import(
     if report is None:
         raise NotFoundError("Report not found.")
     if report.import_status == "ready" and report.start_time is not None:
-        return  # already populated; nothing to do
+        if await report_data_is_current(session, report_id):
+            return
+        logger.info(
+            "report %s data is older than current version %d — re-importing",
+            report_id,
+            REPORT_DATA_VERSION,
+        )
+        # Cascade through fights → players → casts/gear/analyses. We keep
+        # the Report row itself (analyses referencing it survive the
+        # version bump cleanly — their historical structured output is
+        # unchanged, only the *next* analysis sees fresh data).
+        await session.execute(
+            delete(ReportFight).where(ReportFight.report_id == report_id)
+        )
+        report.import_status = "importing"
+        await session.flush()
 
     code = report.wcl_code
     owner_user_id = report.owner_user_id
@@ -178,8 +236,12 @@ async def run_report_import(
                     fight_start_ms=fight_start_ms,
                 )
                 # Mutate in place — JSONB will pick this up on the next flush.
+                # ``_v`` is the version stamp the analyser checks to decide
+                # whether this row's shape matches what the current code
+                # expects to read.
                 merged_extras = dict(fight_row.extras or {})
                 merged_extras["boss_casts"] = boss_casts
+                merged_extras["_v"] = REPORT_DATA_VERSION
                 fight_row.extras = merged_extras
             await session.flush()
 
@@ -360,6 +422,14 @@ async def _populate_players(
                         "rank": None,
                         "out_of": None,
                     },
+                    # Version stamp matched against ``REPORT_DATA_VERSION`` —
+                    # if a future code update bumps the constant, the
+                    # analyser sees this player as stale and triggers a
+                    # full re-import for the parent report. Lazy-fetched
+                    # fields (buffs/debuffs/casts/mana_recovery) are NOT
+                    # gated on this number; only the shape produced by the
+                    # import flow is.
+                    "_v": REPORT_DATA_VERSION,
                 },
             )
             session.add(db_player)

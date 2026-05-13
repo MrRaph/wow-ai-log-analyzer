@@ -46,6 +46,22 @@ from app.services.wcl.queries import (
 
 logger = logging.getLogger(__name__)
 
+# Bumped whenever ``TopLog.detail_payload`` shape gains a new field the
+# analyser depends on. The incremental refresh path snapshots existing
+# detail rows for cache-reuse — stale rows (``_v`` below this constant,
+# or missing entirely) are skipped from the snapshot so they get re-
+# fetched freshly. The analyser also filters stale rows out of its
+# reference query, so a fully-stale (spec, encounter, metric) bucket
+# triggers a clean re-seed instead of feeding the AI old detail.
+#
+# History:
+#   v1: initial detail shape (casts / gear / buffs / debuffs / damage_taken).
+#   v2 (v0.3.0): added stats, talent_ids, boss_casts. Phase-transition
+#                shape on the parent report is also a v3 thing but not
+#                duplicated into detail_payload, so v2 stays the right
+#                stamp.
+TOP_LOG_DETAIL_VERSION = 2
+
 
 def _metric_for_role(role: Role) -> str:
     if role == Role.healer:
@@ -103,8 +119,17 @@ async def refresh_top_logs_for_spec_encounter(
             )
         ).scalars().all()
         for r in existing_rows:
-            if r.detail_payload:
-                cached_detail[(r.wcl_report_code, int(r.wcl_fight_id))] = r.detail_payload
+            detail = r.detail_payload
+            if not detail:
+                continue
+            # Only reuse detail blobs written by the current code shape.
+            # Stale ones (``_v`` below the current ``TOP_LOG_DETAIL_VERSION``
+            # — or missing entirely, which counts as version 0) get dropped
+            # from the cache so the fetch loop below re-pulls them, and
+            # the row gets re-inserted with fresh data + current version.
+            if int(detail.get("_v") or 0) < TOP_LOG_DETAIL_VERSION:
+                continue
+            cached_detail[(r.wcl_report_code, int(r.wcl_fight_id))] = detail
 
     try:
         spec_name = _wcl_spec_name(spec.name_en)
@@ -354,6 +379,11 @@ async def _fetch_detail_for_top_log(
         # between the user's pull and the reference kill directly.
         "boss_casts": boss_casts,
         "metric": metric,
+        # Version stamp — the incremental cache snapshot in
+        # ``refresh_top_logs_for_spec_encounter`` only reuses a detail
+        # blob when this matches ``TOP_LOG_DETAIL_VERSION``. Bumping the
+        # constant forces a clean re-fetch.
+        "_v": TOP_LOG_DETAIL_VERSION,
     }
 
 
