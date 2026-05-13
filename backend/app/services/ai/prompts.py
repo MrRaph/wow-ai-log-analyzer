@@ -82,6 +82,27 @@ improvement report for ONE player on ONE fight. The report must:
   buff/debuff uptime percentages, and damage/healing totals from the JSON.
 - For every finding, name the spell(s) or item(s) involved by spell ID / item
   ID (so the UI can render Wowhead tooltips).
+- **EVERY mention of a spell, item or talent in your prose MUST be written
+  as an inline markdown link in the form ``[Label](kind:id)``** — the
+  frontend parses these and renders them as Wowhead tooltip-aware links.
+  This applies to ``findings[*].detail``, ``rotation_summary``,
+  ``cooldown_usage_summary``, ``stat_recommendations``,
+  ``talent_recommendations``, ``gear_and_trinket_notes``,
+  ``comparison_to_top_logs``, ``headline`` and every entry of
+  ``strengths``. Three valid forms:
+
+      [Mana Tea](spell:115294)            — buffs, casts, debuffs, boss abilities
+      [Algari Mana Potion](item:212017)   — consumables, trinkets, gear
+      [Tea Time](talent:124683)           — talent-tree picks from talent_ids
+
+  ``Label`` is the localised name (use ``localized_names`` verbatim — never
+  invent translations). ``id`` is the numeric ID exactly as it appears in
+  the relevant key of ``localized_names`` / ``talent_ids`` / the gear's
+  ``item_id`` / the cast's ``ability_id``. Do **not** write a plain spell
+  name without the ``[…](spell:…)`` wrapper, do **not** emit raw Wowhead
+  URLs yourself, and do **not** invent IDs that don't appear in the data.
+  When you genuinely need to refer to an ability whose ID isn't in the
+  data, write ``the ability "X"`` in plain text — no link.
 - Compare the player's casts, buff uptimes, and gear against the supplied
   top-log reference players (same spec, same encounter, same region, same
   difficulty). Call out concrete deltas:
@@ -257,6 +278,28 @@ einem Kampf. Der Bericht muss:
   Prozente, Damage-/Healing-Summen aus dem JSON.
 - Bei jedem Befund die betroffenen Zauber/Items per Spell-ID / Item-ID
   benennen, damit die UI Wowhead-Tooltips rendern kann.
+- **JEDE Erwähnung eines Zaubers, Items oder Talents in deinem Fließtext
+  MUSS als inline Markdown-Link in der Form ``[Label](kind:id)``
+  geschrieben werden** — das Frontend parst diese und rendert sie als
+  Wowhead-Tooltips. Gilt für ``findings[*].detail``, ``rotation_summary``,
+  ``cooldown_usage_summary``, ``stat_recommendations``,
+  ``talent_recommendations``, ``gear_and_trinket_notes``,
+  ``comparison_to_top_logs``, ``headline`` und jeden Eintrag von
+  ``strengths``. Drei gültige Formen:
+
+      [Mana-Tee](spell:115294)            — Buffs, Casts, Debuffs, Boss-Fähigkeiten
+      [Algari-Manatrank](item:212017)     — Verbrauchsgüter, Trinkets, Ausrüstung
+      [Teezeit](talent:124683)            — Talente aus talent_ids
+
+  ``Label`` ist der lokalisierte Name (nutze ``localized_names`` verbatim
+  — übersetze nichts selbst). ``id`` ist die numerische ID exakt wie sie
+  im jeweiligen Schlüssel von ``localized_names`` / ``talent_ids`` / im
+  ``item_id`` des Gears / im ``ability_id`` des Casts steht. Schreib
+  **keinen** plain Zaubernamen ohne ``[…](spell:…)``-Wrapper, gib
+  **keine** rohen Wowhead-URLs aus, und **erfinde keine** IDs die nicht
+  in den Daten stehen. Wenn du wirklich eine Fähigkeit erwähnen musst,
+  deren ID nicht in den Daten ist, schreib „die Fähigkeit X" als
+  Plaintext — kein Link.
 - Casts, Buff-Uptimes und Ausrüstung des Spielers gegen die mitgelieferten
   Top-Log-Referenzspieler (gleiche Spec, gleicher Boss, gleiche Region,
   gleiche Schwierigkeit) vergleichen. Konkrete Deltas nennen:

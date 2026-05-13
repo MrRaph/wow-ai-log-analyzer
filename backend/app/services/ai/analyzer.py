@@ -20,6 +20,7 @@ from app.models import (
     ReportPlayer,
     ReportPlayerCast,
     TopLog,
+    WowLocalization,
 )
 from app.services.ai.anthropic_provider import AnthropicProvider
 from app.services.ai.base import AiProvider, AiResponse
@@ -548,6 +549,55 @@ async def _collect_localized_names(
     return names
 
 
+async def _collect_talent_spell_ids(
+    session: AsyncSession,
+    *,
+    player_summary: dict[str, Any],
+    references: list[dict[str, Any]],
+) -> dict[str, int]:
+    """Build a ``{TraitNodeEntry.ID: SpellID}`` map for every talent ID
+    that appears in the player_summary or any top-log reference detail.
+
+    Frontend uses this to turn ``[Label](talent:<id>)`` inline markdown
+    links into real Wowhead spell links — the TraitNodeEntry IDs WCL
+    ships collide with old MoP-era spell IDs, so we have to resolve
+    through ``wow_localizations.extras['spell_id']`` (populated by
+    ``_import_talents``) before linking. Missing entries silently fall
+    back to bold text on the frontend.
+    """
+    talent_ids: set[int] = set()
+    for tid in player_summary.get("talent_ids") or []:
+        if tid:
+            talent_ids.add(int(tid))
+    for ref in references:
+        for tid in (ref.get("detail") or {}).get("talent_ids") or []:
+            if tid:
+                talent_ids.add(int(tid))
+    if not talent_ids:
+        return {}
+    # One row per talent (en locale — extras['spell_id'] is locale-
+    # agnostic). UNIQUE constraint on (kind, game_id, locale) means
+    # we only ever get one row per ID.
+    rows = (
+        await session.execute(
+            select(WowLocalization.game_id, WowLocalization.extras)
+            .where(WowLocalization.kind == "talent")
+            .where(WowLocalization.locale == "en")
+            .where(WowLocalization.game_id.in_(talent_ids))
+        )
+    ).all()
+    out: dict[str, int] = {}
+    for game_id, extras in rows:
+        spell_id = (extras or {}).get("spell_id")
+        if not spell_id:
+            continue
+        try:
+            out[str(int(game_id))] = int(spell_id)
+        except (TypeError, ValueError):
+            continue
+    return out
+
+
 async def request_analysis(
     session: AsyncSession,
     *,
@@ -821,6 +871,9 @@ async def request_analysis(
         gear=gear,
         references=references,
     )
+    talent_spell_ids = await _collect_talent_spell_ids(
+        session, player_summary=player_summary, references=references
+    )
 
     # If the row already exists (worker path), it tells us whether BYOK was
     # requested. New rows fall through to the app-wide path.
@@ -915,6 +968,11 @@ async def request_analysis(
         analysis.structured = {
             **(response.structured or {}),
             "_localized_names": localized_names,
+            # ``[Label](talent:<id>)`` markdown links in the AI's prose
+            # carry TraitNodeEntry IDs (different namespace from spell
+            # IDs). Frontend resolves to the underlying spell ID via
+            # this map before linking to Wowhead.
+            "_talent_spell_ids": talent_spell_ids,
             "_parse_metrics": {
                 "parse_percent": parse_metrics.get("rank_percent"),
                 "ilvl_percent": parse_metrics.get("ilvl_percent"),
