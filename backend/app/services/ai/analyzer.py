@@ -27,9 +27,11 @@ from app.services.ai.openai_provider import OpenAiCompatibleProvider
 from app.services.ai.prompts import build_user_prompt, system_prompt_for
 from app.services.wcl.client import WclClient
 from app.services.wcl.parser import (
+    aggregate_mana_recovery,
     parse_aura_table,
     parse_casts_table,
     parse_damage_taken_table,
+    parse_player_resource_events_page,
     parse_report_rankings_for_player,
 )
 from app.services.wcl.queries import (
@@ -37,6 +39,7 @@ from app.services.wcl.queries import (
     REPORT_CASTS,
     REPORT_DAMAGE_TAKEN_FOR_PLAYER,
     REPORT_DEBUFFS_BY_PLAYER,
+    REPORT_PLAYER_RESOURCE_EVENTS,
     REPORT_RANKINGS,
 )
 from app.services.wcl_oauth_service import build_user_wcl_client
@@ -278,7 +281,14 @@ async def _enrich_player_with_aura_and_damage_taken(
     # means "we've already asked WCL". Avoids re-fetching for fights where WCL
     # genuinely has no rankings (very fresh boss / non-public log).
     has_parse_metrics = "parse_metrics" in extras
-    if has_auras and has_casts and has_parse_metrics:
+    # Only fetched for healers — DPS / tanks don't run on a mana-pressure
+    # budget worth analysing. We mark the key explicitly (even with zero
+    # recovery events) so subsequent analyses of the same player don't
+    # re-query WCL.
+    needs_mana_recovery = (
+        player.role == "healer" and "mana_recovery" not in extras
+    )
+    if has_auras and has_casts and has_parse_metrics and not needs_mana_recovery:
         return
 
     user_client: WclClient | None = None
@@ -370,6 +380,43 @@ async def _enrich_player_with_aura_and_damage_taken(
                     "rank": None,
                     "out_of": None,
                 }
+
+        if needs_mana_recovery:
+            # Healers only — paginate the player's resource events (= mana
+            # grants from Mana Tea, Innervate, potions, buff procs), drop
+            # any non-mana entries, and aggregate per ability with their
+            # fight-relative timestamps. WCL events are report-relative,
+            # so we need the WCL fight start offset that the import flow
+            # stashes in ``fight.extras['wcl_fight_start_ms']``. Falls
+            # back to 0 (so seconds will look weird) only for fights
+            # imported before that field existed.
+            fight_extras = fight.extras or {}
+            fight_start_ms = int(fight_extras.get("wcl_fight_start_ms") or 0)
+            try:
+                collected: list[dict[str, Any]] = []
+                next_ts: float | None = None
+                for _ in range(8):  # cap = 8k events worst case, plenty
+                    args: dict[str, Any] = {
+                        "code": code,
+                        "fightIDs": [fight_id],
+                        "sourceID": actor_id,
+                    }
+                    if next_ts is not None:
+                        args["startTime"] = next_ts
+                    resp = await client.query(REPORT_PLAYER_RESOURCE_EVENTS, args)
+                    page, next_ts = parse_player_resource_events_page(resp)
+                    collected.extend(page)
+                    if next_ts is None:
+                        break
+                extras["mana_recovery"] = aggregate_mana_recovery(
+                    collected, fight_start_ms=fight_start_ms
+                )
+            except Exception:  # noqa: BLE001
+                logger.exception("Mana recovery events fetch failed; continuing without")
+                extras.setdefault(
+                    "mana_recovery",
+                    {"total_recovered_pct": 0.0, "recovery_sources": []},
+                )
     finally:
         if own:
             await client.aclose()
@@ -454,6 +501,11 @@ async def _collect_localized_names(
     # spells), so they belong under kind=spell. Same goes for the
     # reference-detail boss_casts further down.
     for entry in fight_summary.get("boss_casts") or []:
+        if entry.get("ability_id"):
+            spell_ids.add(int(entry["ability_id"]))
+    # Mana-recovery ability IDs (Mana Tea / Innervate / potion / etc.)
+    # are real spells — the AI should be able to cite them by name.
+    for entry in (player_summary.get("mana_recovery") or {}).get("recovery_sources") or []:
         if entry.get("ability_id"):
             spell_ids.add(int(entry["ability_id"]))
 
@@ -623,6 +675,17 @@ async def request_analysis(
         "buffs": player_extras.get("buffs") or [],
         "debuffs": player_extras.get("debuffs") or [],
         "damage_taken": player_extras.get("damage_taken") or [],
+        # Healer-only: explicit mana-grant timeline (Mana Tea / Innervate /
+        # potion procs / buff-driven mana restoration). WCL's public API
+        # does NOT expose absolute mana levels or cast costs — only these
+        # explicit grants are observable. The AI combines this with the
+        # player's cast count + class-spell knowledge from its training
+        # to estimate whether mana pressure was an actual constraint.
+        # Empty / zero on non-healers.
+        "mana_recovery": player_extras.get("mana_recovery") or {
+            "total_recovered_pct": 0.0,
+            "recovery_sources": [],
+        },
         # WCL parse percentile (vs all public logs) and ilvl-bracket
         # percentile (vs same-gear-bracket logs, gear-normalised). Both 0-100
         # (higher=better) or null when WCL has no ranking data for this

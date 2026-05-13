@@ -129,6 +129,37 @@ query ReportDamageTaken(
 }
 """
 
+# Resource-change event stream for one player. Used to build the mana-
+# recovery timeline (Mana Tea / Innervate / potions / buff procs that
+# grant mana). WCL's public GraphQL does NOT expose absolute resource
+# levels or cast costs — only explicit *grants* show up here. The
+# analyser combines this with the player's cast counts and the LLM's
+# class knowledge to reason about mana pressure.
+REPORT_PLAYER_RESOURCE_EVENTS = """
+query ReportPlayerResourceEvents(
+  $code: String!,
+  $fightIDs: [Int]!,
+  $sourceID: Int!,
+  $startTime: Float
+) {
+  reportData {
+    report(code: $code) {
+      events(
+        dataType: Resources,
+        fightIDs: $fightIDs,
+        sourceID: $sourceID,
+        startTime: $startTime,
+        limit: 1000
+      ) {
+        data
+        nextPageTimestamp
+      }
+    }
+  }
+}
+"""
+
+
 # Per-cast event stream for enemy actors only — used to extract boss-cast
 # *timestamps* (not just aggregated counts like ``REPORT_CASTS`` for a
 # player). ``report.events`` is paginated: each response carries up to

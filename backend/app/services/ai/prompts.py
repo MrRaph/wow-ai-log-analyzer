@@ -155,6 +155,34 @@ improvement report for ONE player on ONE fight. The report must:
 - Examine ``damage_taken`` to flag mechanics the player is eating that top
   performers avoid. Do not invent boss mechanics — only reference abilities
   that are actually in the data.
+- **For healers only: use ``player.mana_recovery`` to reason about mana
+  pressure.** WCL's public API does NOT expose absolute mana levels or
+  cast costs — what you get here is the timeline of *explicit grants*
+  (Mana Tea procs, Innervate, potions, buff-driven restoration):
+    - ``total_recovered_pct``: sum of all grants as % of max mana pool.
+      Values above 100% are normal on long fights.
+    - ``recovery_sources``: top abilities with their ``count``,
+      cumulative ``total_pct`` and ``timestamps_seconds`` of each grant.
+  How to use it:
+    - Cross-check vs cooldown availability the player should have hit:
+      e.g. Mana Tea is on a 90 s CD, so a 7 min fight allows ~5 charges
+      — if ``count`` for Mana Tea is 2, two charges were dropped.
+    - Look for a *gap* in the union of ``timestamps_seconds`` across
+      sources of 90 s or more when the player's heal-cast rate was
+      high — that's a probable mana dip the player should have plugged
+      with a potion or held an explicit cooldown for. You cannot see
+      the absolute mana % at any point, but the *pattern* of recovery
+      events (frequent + spread out = sustained; clumped early = ran
+      dry late; clumped late = panic recovery) is diagnostic.
+    - If a healer cast 400+ heals over a 6 min fight with only one
+      potion and no Innervate/Tea late, mana was almost certainly the
+      bottleneck even if you cannot prove the exact pct.
+    - Quote sources by their localised name from ``localized_names``
+      (``spell:<id>`` key), never by raw id. Do NOT make up an absolute
+      "% at time T" number — say "no recovery between 2:00 and 4:10
+      while cast rate stayed at ~60/min" instead.
+  This block is empty / zero on non-healers. If empty, skip the topic
+  entirely — don't speculate about mana for DPS/tanks.
 - **Trace causes, not just symptoms.** When a buff/debuff has low uptime
   or a proc seems weak, identify the *cast that grants it* and discuss the
   cast frequency. Use the player's ``top_casts`` list (with
@@ -305,6 +333,35 @@ einem Kampf. Der Bericht muss:
 - Werte ``damage_taken`` aus, um Mechaniken zu flaggen, die der Spieler
   frisst, die Top-Performer aber dodgen. Erfinde keine Boss-Mechaniken —
   beziehe dich nur auf Fähigkeiten, die tatsächlich in den Daten stehen.
+- **Nur für Healer: ``player.mana_recovery`` nutzen, um Mana-Pressure zu
+  bewerten.** WCLs öffentliche API exponiert KEINEN absoluten Mana-Stand
+  und KEINE Cast-Kosten — was du bekommst ist die Timeline der
+  *expliziten Grants* (Mana Tea / Innervate / Tränke / Buff-Recovery):
+    - ``total_recovered_pct``: Summe aller Grants in % vom Max-Mana.
+      Werte über 100% sind auf langen Fights normal.
+    - ``recovery_sources``: Top-Abilities mit ``count``,
+      ``total_pct`` und ``timestamps_seconds`` jedes Grants.
+  So nutzt du das:
+    - Cross-Check gegen erwartete CD-Nutzungen: Mana Tee hat 90s CD →
+      auf 7 Min Fight ~5 Charges. Wenn ``count`` für Mana Tee = 2 ist,
+      wurden 3 Charges verpasst.
+    - Suche *Lücken* in der Vereinigung der ``timestamps_seconds`` aller
+      Sources von ≥90s während der Cast-Rate hoch war — das ist
+      vermutlich ein Mana-Dip, den der Spieler mit einem Trank oder
+      einem zurückgehaltenen CD hätte schließen sollen. Du siehst KEINEN
+      absoluten Mana-Wert, aber das *Muster* der Recovery-Events
+      (häufig + verteilt = sustained; früh geclumped = später leer;
+      spät geclumped = Panik-Recovery) ist diagnostisch.
+    - Wenn ein Healer 400+ Heals in 6 Min macht mit nur 1 Trank und
+      keinem Innervate/Tee spät, war Mana mit großer Wahrscheinlichkeit
+      der Flaschenhals — auch wenn du den exakten % nicht beweisen kannst.
+    - Zitiere Sources über ihren lokalisierten Namen aus
+      ``localized_names`` (``spell:<id>``-Key), nie über die rohe ID.
+      Erfinde KEINE absoluten "% bei Zeitpunkt T"-Zahlen — sag
+      stattdessen „zwischen 2:00 und 4:10 kein Recovery-Event während
+      die Cast-Rate bei ~60/min blieb".
+  Bei Nicht-Heilern ist der Block leer / null. Wenn leer, überspring das
+  Thema komplett — keine Mana-Spekulation für DPS/Tanks.
 - **Ursache statt Symptom.** Wenn ein Buff/Debuff niedrige Uptime hat oder
   ein Proc schwach wirkt, identifiziere den *Cast, der ihn gewährt*, und
   bewerte dessen Cast-Frequenz. Nutze dafür die ``top_casts``-Liste des

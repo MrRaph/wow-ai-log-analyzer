@@ -683,6 +683,138 @@ def aggregate_boss_casts(
     return out
 
 
+def parse_player_resource_events_page(
+    payload: dict[str, Any], *, resource_type: int = 0
+) -> tuple[list[dict[str, Any]], float | None]:
+    """Pull one page of mana ``resourcechange`` events for a single player.
+
+    WCL's resource events only ever cover *explicit grants* (Mana Tea,
+    Innervate, potions, buff procs). Cast costs are deducted by the
+    client and never emitted as events — so every event we see is a
+    positive mana gain. Returns ``(events, next_page_timestamp)``.
+
+    ``resource_type`` defaults to ``0`` = mana. Each kept event has
+    ``timestamp_ms`` (report-relative), ``ability_id``, ``amount``
+    (raw resource units gained), ``max_resource`` (the player's max
+    pool at the time of the event — needed to express the amount as a
+    percentage at aggregation time), and ``waste`` (overcap).
+    """
+    import json as _json
+
+    rd = (payload or {}).get("reportData", {})
+    report = rd.get("report") if rd else None
+    events_blob = (report or {}).get("events") or {}
+    next_ts = events_blob.get("nextPageTimestamp")
+    raw = events_blob.get("data") or []
+    if isinstance(raw, str):
+        try:
+            raw = _json.loads(raw)
+        except (ValueError, TypeError):
+            raw = []
+    if not isinstance(raw, list):
+        raw = []
+    out: list[dict[str, Any]] = []
+    for ev in raw:
+        if not isinstance(ev, dict):
+            continue
+        if ev.get("type") != "resourcechange":
+            continue
+        if ev.get("resourceChangeType") != resource_type:
+            continue
+        try:
+            ability_id = int(ev.get("abilityGameID") or 0)
+            ts = int(ev.get("timestamp") or 0)
+            amount = int(ev.get("resourceChange") or 0)
+            max_res = int(ev.get("maxResourceAmount") or 0)
+        except (TypeError, ValueError):
+            continue
+        if not ability_id or amount <= 0 or max_res <= 0:
+            continue
+        out.append(
+            {
+                "ability_id": ability_id,
+                "timestamp_ms": ts,
+                "amount": amount,
+                "max_resource": max_res,
+                "waste": int(ev.get("waste") or 0),
+            }
+        )
+    return out, (float(next_ts) if next_ts is not None else None)
+
+
+def aggregate_mana_recovery(
+    events: list[dict[str, Any]],
+    *,
+    fight_start_ms: int,
+) -> dict[str, Any]:
+    """Collapse a player's mana-grant events into a compact prompt-friendly summary.
+
+    Output shape::
+
+        {
+          "total_recovered_pct": 145.2,
+          "recovery_sources": [
+            {
+              "ability_id": 115294,
+              "count": 5,
+              "total_pct": 10.5,
+              "timestamps_seconds": [12, 95, 178, 261, 359],
+            },
+            ...
+          ]
+        }
+
+    ``total_recovered_pct`` is the sum of all grants expressed as a
+    percentage of the player's max pool — values above 100% are normal
+    on long fights with frequent Mana Tea / potions / etc. The AI uses
+    this together with the player's cast count to estimate whether
+    sustain matched the cast pressure.
+
+    ``recovery_sources`` is sorted by total contribution and capped at
+    the top 6 abilities; each entry exposes its own per-cast timestamps
+    so the AI can spot long gaps between grants (= probable mana dip).
+    """
+    if not events:
+        return {"total_recovered_pct": 0.0, "recovery_sources": []}
+    by_id: dict[int, list[dict[str, Any]]] = {}
+    for ev in events:
+        aid = int(ev.get("ability_id") or 0)
+        if not aid:
+            continue
+        by_id.setdefault(aid, []).append(ev)
+
+    sources: list[dict[str, Any]] = []
+    total_pct = 0.0
+    for aid, evs in by_id.items():
+        # Each event has its own max_resource snapshot; for the
+        # percentage we use the largest max seen (mana pool can grow
+        # mid-fight from buffs/trinkets but the difference is tiny).
+        max_res = max((e.get("max_resource") or 1) for e in evs)
+        sum_amount = sum(int(e.get("amount") or 0) for e in evs)
+        pct = (sum_amount / max_res) * 100 if max_res else 0.0
+        total_pct += pct
+        # Timestamps in fight-relative seconds (integer is enough — we're
+        # looking at >1s resolution anyway).
+        evs.sort(key=lambda e: int(e.get("timestamp_ms") or 0))
+        ts_sec = [
+            max(0, round((int(e.get("timestamp_ms") or 0) - fight_start_ms) / 1000))
+            for e in evs
+        ]
+        sources.append(
+            {
+                "ability_id": aid,
+                "count": len(evs),
+                "total_pct": round(pct, 1),
+                "timestamps_seconds": ts_sec,
+            }
+        )
+    sources.sort(key=lambda s: -s["total_pct"])
+    return {
+        "total_recovered_pct": round(total_pct, 1),
+        "recovery_sources": sources[:6],
+    }
+
+
 def parse_damage_taken_table(payload: dict[str, Any]) -> list[dict[str, Any]]:
     """Parse a DamageTaken table (filtered to enemy sources) into per-ability totals."""
     rd = (payload or {}).get("reportData", {})
