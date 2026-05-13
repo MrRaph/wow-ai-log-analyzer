@@ -25,6 +25,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.config import settings
 from app.models import GameSpec, Role, TopLog
 from app.services.wcl.client import WclClient
+from app.services.report_service import fetch_boss_cast_timeline
 from app.services.wcl.parser import (
     composition_from_player_details,
     parse_aura_table,
@@ -282,6 +283,24 @@ async def _fetch_detail_for_top_log(
         return None
     actor_id = target["actor_id"]
 
+    # Pull the fight's report-relative start offset from the same payload —
+    # we extended REPORT_PLAYER_DETAILS to include ``fights{startTime}`` so
+    # the boss-cast timeline below can convert event timestamps into
+    # fight-relative seconds without a separate WCL roundtrip.
+    fight_start_ms = 0
+    pd_report = (pd_payload.get("reportData") or {}).get("report") or {}
+    for fmeta in pd_report.get("fights") or []:
+        try:
+            if int(fmeta.get("id", -1)) == int(fight_id):
+                fight_start_ms = int(fmeta.get("startTime") or 0)
+                break
+        except (TypeError, ValueError):
+            continue
+
+    boss_casts = await fetch_boss_cast_timeline(
+        client, code=code, fight_id=int(fight_id), fight_start_ms=fight_start_ms
+    )
+
     casts_payload = await client.query(
         REPORT_CASTS, {"code": code, "fightIDs": [fight_id], "sourceID": actor_id}
     )
@@ -329,6 +348,11 @@ async def _fetch_detail_for_top_log(
         "buffs": buffs,
         "debuffs": debuffs,
         "damage_taken": damage_taken,
+        # Per-ability boss-cast timeline for THIS fight (fight-relative
+        # seconds since fight start). Same shape as the user-fight's
+        # ``fight_summary.boss_casts`` so the AI can compare cycle periods
+        # between the user's pull and the reference kill directly.
+        "boss_casts": boss_casts,
         "metric": metric,
     }
 

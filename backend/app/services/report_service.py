@@ -17,8 +17,10 @@ from app.models import (
 )
 from app.services.wcl.client import WclClient
 from app.services.wcl.parser import (
+    aggregate_boss_casts,
     parse_damage_done_table,
     parse_deaths_table,
+    parse_enemy_cast_events_page,
     parse_gear_from_player_details,
     parse_healing_done_table,
     parse_player_details,
@@ -27,6 +29,7 @@ from app.services.wcl.parser import (
     parse_report_rankings_for_fight,
 )
 from app.services.wcl.queries import (
+    REPORT_ENEMY_CAST_EVENTS,
     REPORT_OVERVIEW,
     REPORT_PLAYER_DETAILS,
     REPORT_RANKINGS,
@@ -34,6 +37,49 @@ from app.services.wcl.queries import (
 )
 
 logger = logging.getLogger(__name__)
+
+
+async def fetch_boss_cast_timeline(
+    client: WclClient,
+    *,
+    code: str,
+    fight_id: int,
+    fight_start_ms: int,
+    max_pages: int = 10,
+) -> list[dict[str, Any]]:
+    """Walk ``report.events(dataType: Casts, hostilityType: Enemies)`` for one
+    fight and return the compact per-ability cast timeline the AI prompt wants.
+
+    Pagination: WCL returns up to ``limit`` events per page (we ask for 1000)
+    and includes ``nextPageTimestamp`` whenever there's more data. We follow
+    it but cap at ``max_pages`` (= 10k events worst case) so one runaway log
+    can't stall the import — long fights with 4-6 boss abilities cycling
+    every 25-45s typically fit in 1-2 pages.
+
+    Returns the same shape as ``aggregate_boss_casts``: a list of
+    ``{ability_id, count, cast_seconds: [...]}`` entries. Empty list on
+    upstream failure (logged) so the import can still complete; missing
+    boss-cast data just means the AI doesn't get the timeline for this
+    fight, not that the import fails.
+    """
+    collected: list[dict[str, Any]] = []
+    next_ts: float | None = None
+    for _ in range(max_pages):
+        variables: dict[str, Any] = {"code": code, "fightIDs": [fight_id]}
+        if next_ts is not None:
+            variables["startTime"] = next_ts
+        try:
+            payload = await client.query(REPORT_ENEMY_CAST_EVENTS, variables)
+        except Exception:  # noqa: BLE001
+            logger.exception(
+                "boss cast events fetch failed for code=%s fight=%s", code, fight_id
+            )
+            return []
+        page, next_ts = parse_enemy_cast_events_page(payload)
+        collected.extend(page)
+        if next_ts is None:
+            break
+    return aggregate_boss_casts(collected, fight_start_ms=fight_start_ms)
 
 
 async def create_import_skeleton(
@@ -117,6 +163,26 @@ async def run_report_import(
 
         all_fight_ids = list(fights_by_id.keys())
         if all_fight_ids:
+            # Boss-cast timeline per fight — one ``report.events`` walk each.
+            # Done as its own pass (not inside _populate_players) because this
+            # data is fight-scoped, not player-scoped: every player on the
+            # fight sees the same boss-cast pattern.
+            for fight_wcl_id, fight_row in fights_by_id.items():
+                fight_start_ms = int(
+                    (fight_row.extras or {}).get("wcl_fight_start_ms") or 0
+                )
+                boss_casts = await fetch_boss_cast_timeline(
+                    client,
+                    code=code,
+                    fight_id=fight_wcl_id,
+                    fight_start_ms=fight_start_ms,
+                )
+                # Mutate in place — JSONB will pick this up on the next flush.
+                merged_extras = dict(fight_row.extras or {})
+                merged_extras["boss_casts"] = boss_casts
+                fight_row.extras = merged_extras
+            await session.flush()
+
             await _populate_players(session, client, code, all_fight_ids, fights_by_id)
 
         report.import_status = "ready"
