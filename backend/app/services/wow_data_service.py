@@ -33,6 +33,14 @@ logger = logging.getLogger(__name__)
 WAGO_BASE = "https://wago.tools"
 LOCALES: tuple[tuple[str, str], ...] = (("en", "enUS"), ("de", "deDE"))
 
+# Every ``kind`` value ``run_full_import`` emits into ``wow_localizations``.
+# Consumed by ``workers.tasks.wow_data.refresh_wow_data`` so that "build
+# already imported" doesn't short-circuit a run when the *code* has learned
+# about a new kind (e.g. ``talent`` added in v0.2.0) that the previous
+# success run never wrote. Add new kinds here at the same time you add a
+# new importer phase below.
+EXPECTED_KINDS: frozenset[str] = frozenset({"spell", "talent", "item", "encounter"})
+
 # Larger CSVs (ItemSparse weighs ~80 MB / locale) require a generous timeout
 # and a bigger HTTP read buffer; httpx defaults are fine for now.
 _HTTP_TIMEOUT = httpx.Timeout(connect=15, read=600, write=60, pool=15)
