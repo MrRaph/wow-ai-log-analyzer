@@ -70,6 +70,48 @@ class AnalysisOut(BaseModel):
     completion_tokens: int
     created_at: datetime
     updated_at: datetime
+    # The raw share token, if the owner has enabled public sharing for this
+    # analysis. ``None`` means private. The frontend uses this to decide
+    # whether to show "Share is on" + a copy-link button or "Share" toggle.
+    # We only ever serialise this on owner-authenticated reads — see the
+    # public schema below for the anonymous view.
+    share_token: str | None = None
+
+
+class AnalysisPublicOut(BaseModel):
+    """Public-share view of an analysis — read anonymously via the share token.
+
+    Excludes every field that could pivot to other resources or leak owner
+    /billing metadata: ``share_token`` itself (the viewer already has it),
+    raw UUIDs of the linked report/fight/player rows (we hand back the WCL
+    code + display strings instead), token counts, the requester id, and
+    the ``error`` blob (often contains raw stack traces / model output).
+    """
+
+    model_config = ConfigDict(from_attributes=True)
+
+    id: uuid.UUID
+    status: AnalysisStatus
+    locale: str
+    provider: str
+    model: str
+    summary: str
+    structured: AnalysisStructured | dict
+    created_at: datetime
+    updated_at: datetime
+    # Public WCL data — already accessible by anyone with the report code.
+    report_code: str
+    fight_name: str
+    fight_name_localized: str | None = None
+    encounter_id: int | None = None
+    is_kill: bool
+    duration_ms: int
+    boss_percentage: float | None = None
+    # Public WoW character data — also already on warcraftlogs.com.
+    player_name: str
+    player_server: str
+    player_class: str
+    player_spec: str
 
 
 class AnalysisListItem(BaseModel):

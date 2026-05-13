@@ -48,6 +48,20 @@
     "captchaMissing": "Please complete the captcha first."
   },
   "analyze": {
+    "share": {
+      "title": "Share this analysis",
+      "offHint": "Private — only you can see this analysis.",
+      "onHint": "Public — anyone with the link can read this analysis.",
+      "enable": "Generate link",
+      "disable": "Stop sharing",
+      "copy": "Copy",
+      "copied": "Copied",
+      "copyFailed": "Couldn't copy to clipboard — please select the link manually.",
+      "urlLabel": "Public share URL",
+      "publicBanner": "Shared analysis",
+      "publicNotFoundTitle": "Analysis not found",
+      "publicNotFoundBody": "This share link has been revoked or never existed."
+    },
     "title": "Analyze a Warcraft Logs report",
     "subtitle": "Paste a WCL link or report code. We'll cache the report and let you ask the AI for an analysis per fight and player.",
     "input": "https://www.warcraftlogs.com/reports/...",

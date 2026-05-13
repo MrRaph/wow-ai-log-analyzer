@@ -61,3 +61,13 @@ class Analysis(Base, TimestampMixin):
     error: Mapped[str | None] = mapped_column(Text, nullable=True)
     prompt_tokens: Mapped[int] = mapped_column(default=0, nullable=False)
     completion_tokens: Mapped[int] = mapped_column(default=0, nullable=False)
+    # Public share token. ``None`` means the analysis is private; any other
+    # value means it can be read anonymously via ``GET /api/v1/shared-
+    # analyses/{token}``. Owners can rotate this on/off freely. We use
+    # ``secrets.token_urlsafe(32)`` (≈ 256 bits of entropy) so guessing a
+    # valid token is statistically impossible. Unique-indexed so the
+    # lookup is O(1) and accidental collisions would be rejected by the
+    # DB rather than leaking another user's analysis.
+    share_token: Mapped[str | None] = mapped_column(
+        String(64), nullable=True, unique=True, index=True
+    )

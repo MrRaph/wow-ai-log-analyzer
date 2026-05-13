@@ -9,6 +9,7 @@ from app.api.v1 import (
     auth,
     meta,
     reports,
+    shared_analyses,
     top_logs,
     users,
     wcl_oauth,
@@ -25,3 +26,9 @@ api_router.include_router(wow_data.router, prefix="/admin", tags=["admin-wow-dat
 api_router.include_router(reports.router, prefix="/reports", tags=["reports"])
 api_router.include_router(top_logs.router, prefix="/top-logs", tags=["top-logs"])
 api_router.include_router(analysis.router, prefix="/analyses", tags=["analyses"])
+# Anonymous read-only endpoint for share links. Mounted at its own prefix
+# (instead of under /analyses) so the token-based path can't accidentally
+# get UUID-validated by /analyses/{analysis_id}.
+api_router.include_router(
+    shared_analyses.router, prefix="/shared-analyses", tags=["shared-analyses"]
+)
