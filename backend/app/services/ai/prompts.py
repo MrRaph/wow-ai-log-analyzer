@@ -127,7 +127,12 @@ improvement report for ONE player on ONE fight. The report must:
       flag it as a critical finding. A death is almost always a more
       severe finding than a 5% DPS gap.
 - Use the supplied ``phase_transitions`` to give phase-aware feedback when the
-  fight has multiple phases ("you missed a CD usage at the P2 transition").
+  fight has multiple phases. Each entry has ``id``, ``start_seconds``
+  (seconds since fight-start — directly comparable to
+  ``duration_minutes`` × 60), and when WCL knows them, ``name`` and an
+  ``is_intermission`` flag. Quote the phase by *name* when available
+  ("missed a CD usage at the Sanguine Intermission transition at 1:42"),
+  not by raw id. Do not waste cooldowns on intermission phases.
 - Examine ``damage_taken`` to flag mechanics the player is eating that top
   performers avoid. Do not invent boss mechanics — only reference abilities
   that are actually in the data.
@@ -253,7 +258,13 @@ einem Kampf. Der Bericht muss:
       kennzeichne das als kritischen Befund. Ein Tod ist fast immer
       schwerwiegender als ein 5%-DPS-Loss.
 - Nutze ``phase_transitions`` für phasen-bewusste Hinweise wenn der Kampf
-  mehrere Phasen hat („CD-Nutzung am P2-Übergang verpasst").
+  mehrere Phasen hat. Jeder Eintrag hat ``id``, ``start_seconds``
+  (Sekunden ab Fight-Start, direkt mit ``duration_minutes`` × 60
+  vergleichbar) und — wenn WCL sie kennt — ``name`` und ein
+  ``is_intermission``-Flag. Zitiere die Phase über den *Namen* wenn
+  vorhanden („CD-Nutzung am Übergang zur Blutigen Intermission bei 1:42
+  verpasst"), nicht über die rohe ID. Verschwende keine Cooldowns in
+  Intermission-Phasen.
 - Werte ``damage_taken`` aus, um Mechaniken zu flaggen, die der Spieler
   frisst, die Top-Performer aber dodgen. Erfinde keine Boss-Mechaniken —
   beziehe dich nur auf Fähigkeiten, die tatsächlich in den Daten stehen.

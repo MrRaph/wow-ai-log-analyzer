@@ -29,6 +29,14 @@ query ReportOverview($code: String!) {
         endTime
         phaseTransitions { id startTime }
       }
+      # Phase metadata per encounter (id → name, is_intermission). We zip
+      # this into each fight's ``phase_transitions`` so the AI prompt has
+      # semantically meaningful labels instead of bare numeric IDs.
+      phases {
+        encounterID
+        separatesWipes
+        phases { id name isIntermission }
+      }
     }
   }
 }
