@@ -254,6 +254,16 @@ export interface AnalysisStructured {
   // Underscore-prefixed fields are NOT produced by the AI — they are
   // server-side metadata stitched into the structured output before save.
   _localized_names?: Record<string, string>;
+  /**
+   * Maps a ``TraitNodeEntry.ID`` (what WCL ships in
+   * ``combatantInfo.talentTree`` and what the AI puts inside
+   * ``[Label](talent:<id>)`` inline markdown links) to the underlying
+   * Wowhead-resolvable spell ID. Without this we'd render
+   * ``/spell/<traitNodeEntryId>`` URLs that point to unrelated MoP-era
+   * spells (the ID spaces collide), so the resolver hides the link and
+   * shows bold text instead when an entry is missing.
+   */
+  _talent_spell_ids?: Record<string, number>;
   _parse_metrics?: {
     parse_percent: number | null;
     ilvl_percent: number | null;
