@@ -1,0 +1,42 @@
+name: ❓ Question / support
+description: You're stuck on setup, configuration or something the docs don't cover.
+title: "question: <one-line summary>"
+labels: ["question"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Before opening: skim the [README](../blob/master/README.md) and the
+        [docs/SETUP.md](../blob/master/docs/SETUP.md) — most setup questions
+        are answered there. If you've already checked, please describe what
+        you tried so we don't suggest the same path.
+
+  - type: textarea
+    id: question
+    attributes:
+      label: What are you trying to do?
+      description: |
+        Describe the goal first, then where you got stuck. Concrete is best.
+    validations:
+      required: true
+
+  - type: input
+    id: version
+    attributes:
+      label: Version / commit
+      placeholder: "0.3.0 / commit abc1234"
+
+  - type: textarea
+    id: tried
+    attributes:
+      label: What have you already tried?
+      description: |
+        Helps us avoid suggesting things that didn't work for you.
+
+  - type: textarea
+    id: extra
+    attributes:
+      label: Logs / config snippets / screenshots
+      description: |
+        Redact secrets first. We will format pasted text as a code block.
+      render: shell

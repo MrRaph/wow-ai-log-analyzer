@@ -1,0 +1,3 @@
+# Disable the blank-issue option so every report goes through a structured
+# template. Lower-noise, higher-quality bug reports.
+blank_issues_enabled: false

@@ -1,0 +1,104 @@
+name: 🐛 Bug report
+description: Something doesn't behave the way the docs / UI suggest it should.
+title: "bug: <one-line summary>"
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for taking the time to file a report. Please fill in as much
+        of the form as you can — the more concrete the better.
+
+        > ⚠️ If you've found a **security vulnerability**, please don't open
+        > a public issue. Use the private channel described in
+        > [SECURITY.md](../blob/master/SECURITY.md) instead.
+
+  - type: input
+    id: version
+    attributes:
+      label: Version / commit
+      description: |
+        Which release or commit are you on? Look in the running container
+        image tag (e.g. `0.3.0`), the `/api/v1/health` endpoint or
+        `git log -1 --format=%h` on a checkout.
+      placeholder: "0.3.0 / commit abc1234"
+    validations:
+      required: true
+
+  - type: dropdown
+    id: deployment
+    attributes:
+      label: Deployment
+      options:
+        - Self-hosted via official ghcr.io images
+        - Self-hosted via local `docker compose up --build`
+        - Other (please describe in "Additional context")
+    validations:
+      required: true
+
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened?
+      description: Concrete observed behaviour. Screenshots welcome.
+      placeholder: |
+        When I trigger an analysis on a Mythic+ key, the analyzer hangs at
+        "running" for 5 minutes then fails with "Upstream WCL error".
+    validations:
+      required: true
+
+  - type: textarea
+    id: expected
+    attributes:
+      label: What did you expect?
+      description: How should it have behaved?
+    validations:
+      required: true
+
+  - type: textarea
+    id: repro
+    attributes:
+      label: Steps to reproduce
+      description: |
+        Concrete numbered steps. If a public WCL log triggers the bug,
+        paste the URL.
+      value: |
+        1. Go to '...'
+        2. Click on '...'
+        3. See error in `docker compose logs backend`
+    validations:
+      required: true
+
+  - type: textarea
+    id: logs
+    attributes:
+      label: Relevant log output
+      description: |
+        Paste backend / worker / frontend logs around the time of the bug.
+        We will automatically format this as a code block.
+      render: shell
+
+  - type: dropdown
+    id: ai-provider
+    attributes:
+      label: AI provider in use
+      description: Only relevant for analysis-related bugs.
+      options:
+        - "n/a (not analysis-related)"
+        - Anthropic Claude (app-wide)
+        - OpenAI (app-wide)
+        - Local (llama.cpp / GGUF)
+        - BYOK — Anthropic
+        - BYOK — OpenAI
+        - BYOK — OpenAI-compatible
+        - AI disabled
+    validations:
+      required: true
+
+  - type: textarea
+    id: extra
+    attributes:
+      label: Additional context
+      description: |
+        Anything else relevant — environment quirks, reverse proxy details,
+        non-default settings, custom builds, etc.

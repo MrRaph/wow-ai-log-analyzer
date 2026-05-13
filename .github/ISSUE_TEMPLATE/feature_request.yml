@@ -1,0 +1,59 @@
+name: ✨ Feature request
+description: Propose a new feature or a meaningful improvement to an existing one.
+title: "feat: <one-line summary>"
+labels: ["enhancement"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for the idea! A good feature request usually answers three
+        questions: *what use case does it solve?*, *how would it work from a
+        user's perspective?*, and *what's the simplest version that would
+        already deliver most of the value?*
+
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem / use case
+      description: |
+        What are you trying to do that you can't easily do today?
+        Concrete examples (e.g. "after a wipe the analysis doesn't know
+        the player died at 1:30") help much more than abstract requests.
+    validations:
+      required: true
+
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposed solution
+      description: |
+        What would the feature look like from a user's point of view?
+        UI sketches / pseudo-prompts / API request shapes are all fine.
+    validations:
+      required: true
+
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives considered
+      description: |
+        Workarounds you've tried, related features you'd compare against,
+        reasons you ruled them out.
+
+  - type: dropdown
+    id: scope
+    attributes:
+      label: Roughly what scope is this?
+      options:
+        - "Small (one prompt/UI tweak)"
+        - "Medium (a new endpoint or DB column)"
+        - "Large (a new subsystem, e.g. a new data source)"
+        - "Not sure"
+    validations:
+      required: true
+
+  - type: textarea
+    id: extra
+    attributes:
+      label: Additional context
+      description: Links to WCL examples, screenshots, related issues, etc.

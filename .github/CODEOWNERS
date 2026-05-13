@@ -1,0 +1,7 @@
+# https://docs.github.com/en/repositories/managing-your-repositorys-settings-and-features/customizing-your-repository/about-code-owners
+#
+# Every file in this repo is owned by @babatonga. GitHub auto-requests a
+# review from the listed owner whenever a PR touches files that match the
+# pattern, so the maintainer gets pinged on every contribution.
+
+* @babatonga
