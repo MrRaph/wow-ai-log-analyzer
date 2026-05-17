@@ -64,19 +64,30 @@ async function tryRefresh(): Promise<TokenPair | null> {
 }
 
 export async function apiFetch<T>(path: string, opts: RequestOpts = {}): Promise<T> {
-  const headers: Record<string, string> = {
-    "Content-Type": "application/json",
-  };
+  // FormData bodies (e.g. multipart file uploads) MUST keep their
+  // browser-generated Content-Type header so the multipart boundary
+  // is included; setting Content-Type ourselves wipes it and the
+  // server can't parse the parts. Detect and skip.
+  const isFormData =
+    typeof FormData !== "undefined" && opts.body instanceof FormData;
+
+  const headers: Record<string, string> = {};
+  if (!isFormData) headers["Content-Type"] = "application/json";
   if (opts.locale) headers["X-Locale"] = opts.locale;
   if (!opts.anonymous) {
     const token = getAccessToken();
     if (token) headers["Authorization"] = `Bearer ${token}`;
   }
 
+  let body: BodyInit | undefined;
+  if (opts.body !== undefined) {
+    body = isFormData ? (opts.body as FormData) : JSON.stringify(opts.body);
+  }
+
   const res = await fetch(`${API_BASE}${path}`, {
     method: opts.method ?? "GET",
     headers,
-    body: opts.body !== undefined ? JSON.stringify(opts.body) : undefined,
+    body,
     cache: "no-store",
   });
 

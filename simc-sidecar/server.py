@@ -50,7 +50,7 @@ from pathlib import Path
 from typing import Any, Literal
 
 import uvicorn
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, File, HTTPException, UploadFile
 from pydantic import BaseModel, Field
 
 logger = logging.getLogger("simc-sidecar")
@@ -190,8 +190,9 @@ from contextlib import asynccontextmanager
 
 @asynccontextmanager
 async def _lifespan(_app: FastAPI):
-    global _semaphore
+    global _semaphore, _rebuild_lock
     _semaphore = asyncio.Semaphore(MAX_CONCURRENT)
+    _rebuild_lock = asyncio.Lock()
     sweeper = asyncio.create_task(_retention_sweeper(), name="retention_sweeper")
     try:
         yield
@@ -320,6 +321,142 @@ async def cancel_job(job_id: str) -> dict[str, str]:
         if job.task and not job.task.done():
             job.task.cancel()
     return {"status": "cancelled"}
+
+
+# ---------------------------------------------------------------------------
+# Admin: rebuild simc from source with fresh game data
+# ---------------------------------------------------------------------------
+
+
+def _rebuild_payload() -> dict[str, Any]:
+    """Serialise the current rebuild state for the admin UI to poll."""
+    if _rebuild is None:
+        return {"status": "idle"}
+    return {
+        "id": _rebuild.id,
+        "status": _rebuild.status,
+        "started_at": _rebuild.started_at,
+        "finished_at": _rebuild.finished_at,
+        "error": _rebuild.error,
+        "used_dbcache": _rebuild.used_dbcache,
+        # Keep the log small so the poll payload stays cheap. Frontend
+        # only needs the most recent activity — the full log is in the
+        # container's stdout.
+        "log_tail": "\n".join(_rebuild.log[-200:]),
+    }
+
+
+@app.get("/rebuild-status")
+async def rebuild_status() -> dict[str, Any]:
+    return _rebuild_payload()
+
+
+@app.post("/rebuild", status_code=202)
+async def trigger_rebuild(dbcache: UploadFile | None = File(default=None)) -> dict[str, Any]:
+    """Queue a from-source rebuild of simc. Optionally accepts a
+    ``DBCache.bin`` multipart upload that gets layered on top of the
+    public CDN data — needed if the user wants to sim talent strings
+    referencing trait IDs from a WoW hotfix that's newer than the
+    last public DBC drop. Returns 202 + a snapshot of the rebuild
+    state the admin UI then polls."""
+    global _rebuild
+    assert _rebuild_lock is not None  # initialised in lifespan
+
+    async with _rebuild_lock:
+        if _rebuild is not None and _rebuild.status in ("queued", "running"):
+            raise HTTPException(409, "A simc rebuild is already in progress.")
+        # Save the upload (if any) to a stable path before kicking off
+        # the background task — UploadFile.file is a SpooledTemporaryFile
+        # that can disappear when this handler returns.
+        dbcache_path: str | None = None
+        used = False
+        if dbcache is not None and getattr(dbcache, "filename", None):
+            up_dir = Path("/sidecar/uploads")
+            up_dir.mkdir(parents=True, exist_ok=True)
+            dest = up_dir / "DBCache.bin"
+            with dest.open("wb") as fh:
+                while True:
+                    chunk = await dbcache.read(1 << 16)
+                    if not chunk:
+                        break
+                    fh.write(chunk)
+            dbcache_path = str(dest)
+            used = dest.stat().st_size > 0
+            if not used:
+                # Empty file (browser sent an empty multipart part) —
+                # treat as no upload so we don't overwrite cached state.
+                dest.unlink(missing_ok=True)
+                dbcache_path = None
+
+        job = RebuildJob(id=uuid.uuid4().hex, used_dbcache=used)
+        _rebuild = job
+        job.task = asyncio.create_task(
+            _execute_rebuild(job, dbcache_path),
+            name=f"simc-rebuild-{job.id}",
+        )
+
+    return _rebuild_payload()
+
+
+async def _execute_rebuild(job: RebuildJob, dbcache_path: str | None) -> None:
+    """Spawn the rebuild script, streaming output into the job's log
+    list. Failure modes (CDN download errors, compile failures) get
+    captured rather than propagated so /rebuild-status can show what
+    went wrong."""
+    job.status = "running"
+    job.started_at = time.time()
+    args = [REBUILD_SCRIPT]
+    if dbcache_path:
+        args.append(dbcache_path)
+
+    try:
+        proc = await asyncio.create_subprocess_exec(
+            *args,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.STDOUT,
+        )
+        assert proc.stdout is not None
+
+        async def _pump() -> None:
+            # Stream stdout line-by-line into the job log so /rebuild
+            # -status reflects live progress instead of dumping the
+            # entire output at the end.
+            while True:
+                raw = await proc.stdout.readline()
+                if not raw:
+                    return
+                line = raw.decode("utf-8", "replace").rstrip()
+                if line:
+                    job.log.append(line)
+                    if len(job.log) > 5000:
+                        # Drop oldest entries to bound memory.
+                        del job.log[: len(job.log) - 5000]
+
+        pump_task = asyncio.create_task(_pump())
+        try:
+            rc = await asyncio.wait_for(proc.wait(), timeout=REBUILD_TIMEOUT_S)
+        except asyncio.TimeoutError:
+            proc.kill()
+            await proc.wait()
+            rc = -1
+            job.log.append(f"[rebuild-simc] TIMED OUT after {REBUILD_TIMEOUT_S}s")
+        await pump_task
+
+        if rc == 0:
+            job.status = "succeeded"
+        else:
+            job.status = "failed"
+            job.error = f"rebuild script exited {rc}"
+    except asyncio.CancelledError:
+        job.status = "cancelled"
+        job.error = "rebuild cancelled (sidecar shutdown)"
+        raise
+    except Exception as exc:  # noqa: BLE001
+        logger.exception("simc rebuild failed")
+        job.status = "failed"
+        job.error = f"{type(exc).__name__}: {exc}"
+    finally:
+        job.finished_at = time.time()
 
 
 # ---------------------------------------------------------------------------
@@ -589,6 +726,32 @@ def _build_args_and_profile(
 
 
 CRASH_DUMP_DIR = Path(os.environ.get("SIMC_CRASH_DUMP_DIR", "/tmp/simc-crashes"))
+
+REBUILD_SCRIPT = os.environ.get("SIMC_REBUILD_SCRIPT", "/sidecar/rebuild-simc.sh")
+REBUILD_TIMEOUT_S = int(os.environ.get("SIMC_REBUILD_TIMEOUT_S", "1800"))
+
+
+@dataclass
+class RebuildJob:
+    """In-memory state for an admin-triggered simc rebuild.
+
+    Singleton: at most one rebuild runs concurrently (rebuilds are
+    CPU-bound + DBC-CDN traffic-bound + finally rewrite the binary
+    every other simc invocation depends on, so racing two of them
+    would just produce garbage)."""
+
+    id: str
+    status: JobStatus = "queued"
+    started_at: float | None = None
+    finished_at: float | None = None
+    error: str | None = None
+    log: list[str] = field(default_factory=list)
+    used_dbcache: bool = False
+    task: asyncio.Task | None = None
+
+
+_rebuild: RebuildJob | None = None
+_rebuild_lock: asyncio.Lock | None = None  # initialised in lifespan
 
 
 def _dump_crash(profile_text: str, args: list[str], out_text: str, err_text: str) -> str:

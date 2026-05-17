@@ -196,7 +196,21 @@
     "containerImage": "Image",
     "containerStatus": "Container",
     "updateNow": "Pull latest + recreate",
-    "updating": "Updating…"
+    "updating": "Updating…",
+    "rebuildTitle": "Rebuild simc from source (bleeding-edge game data)",
+    "rebuildHint": "Pulls latest simc source + downloads fresh DBC files from the public WoW CDN + (optionally) layers a DBCache.bin from your local WoW client on top. Use when a WoW hotfix breaks talent strings before the upstream simc image catches up. Takes 10-20 min.",
+    "dbcacheHint": "Optional: select DBCache.bin from <WoW>/Cache/ADB/<region>/DBCache.bin for the absolute latest hotfix data.",
+    "rebuildNow": "Rebuild now",
+    "rebuildRunning": "Rebuilding…",
+    "dbcacheLayered": "DBCache.bin layered",
+    "rebuildStatus": {
+      "queued": "Queued",
+      "running": "Running…",
+      "succeeded": "Succeeded",
+      "failed": "Failed",
+      "cancelled": "Cancelled",
+      "idle": "Idle"
+    }
   },
   "topLogs": {
     "title": "Top logs",

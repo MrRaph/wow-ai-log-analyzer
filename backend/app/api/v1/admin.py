@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import uuid
 
-from fastapi import APIRouter, status
+from fastapi import APIRouter, File, UploadFile, status
 from sqlalchemy import delete, func, select
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 
@@ -392,3 +392,48 @@ async def update_simc_sidecar(_: AdminUser) -> SimcStatusOut:
         base_url=settings.simc_base_url,
         container=container_out,
     )
+
+
+@router.post("/simc/rebuild")
+async def trigger_simc_rebuild(
+    _: AdminUser,
+    dbcache: UploadFile | None = File(default=None),
+) -> dict:
+    """Forward a from-source rebuild trigger (with optional DBCache.bin)
+    to the sidecar. The sidecar runs the full pipeline asynchronously;
+    poll ``GET /admin/simc/rebuild-status`` for progress.
+    """
+    import httpx  # noqa: PLC0415 — admin-only path
+
+    files = None
+    if dbcache is not None and getattr(dbcache, "filename", None):
+        content = await dbcache.read()
+        if content:
+            files = {"dbcache": (dbcache.filename, content, "application/octet-stream")}
+
+    url = f"{settings.simc_base_url.rstrip('/')}/rebuild"
+    try:
+        async with httpx.AsyncClient(timeout=60.0) as client:
+            r = await client.post(url, files=files)
+    except httpx.HTTPError as exc:
+        raise UpstreamError(f"simc sidecar unreachable: {exc}") from exc
+    if r.status_code >= 400:
+        raise UpstreamError(f"simc sidecar rebuild error ({r.status_code}): {r.text[:500]}")
+    return r.json()
+
+
+@router.get("/simc/rebuild-status")
+async def get_simc_rebuild_status(_: AdminUser) -> dict:
+    """Poll the sidecar's rebuild state. Returns ``{status: "idle"}``
+    when no rebuild has been triggered since the sidecar last started."""
+    import httpx  # noqa: PLC0415
+
+    url = f"{settings.simc_base_url.rstrip('/')}/rebuild-status"
+    try:
+        async with httpx.AsyncClient(timeout=15.0) as client:
+            r = await client.get(url)
+    except httpx.HTTPError as exc:
+        raise UpstreamError(f"simc sidecar unreachable: {exc}") from exc
+    if r.status_code >= 400:
+        raise UpstreamError(f"simc sidecar status error ({r.status_code}): {r.text[:500]}")
+    return r.json()

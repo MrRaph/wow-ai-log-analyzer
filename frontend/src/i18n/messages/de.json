@@ -196,7 +196,21 @@
     "containerImage": "Image",
     "containerStatus": "Container",
     "updateNow": "Aktuellstes Image ziehen + neu anlegen",
-    "updating": "Aktualisiere…"
+    "updating": "Aktualisiere…",
+    "rebuildTitle": "simc aus Source bauen (bleeding-edge Spieldaten)",
+    "rebuildHint": "Holt den aktuellen simc-Source, lädt frische DBC-Dateien vom öffentlichen WoW-CDN und legt (optional) eine DBCache.bin aus deinem lokalen WoW-Client obendrauf. Sinnvoll wenn ein WoW-Hotfix Talent-Strings kaputtgemacht hat bevor das upstream simc-Image nachzieht. Dauert 10-20 Min.",
+    "dbcacheHint": "Optional: DBCache.bin aus <WoW>/Cache/ADB/<Region>/DBCache.bin auswählen für den allerneuesten Hotfix-Stand.",
+    "rebuildNow": "Jetzt bauen",
+    "rebuildRunning": "Bau läuft…",
+    "dbcacheLayered": "DBCache.bin angewandt",
+    "rebuildStatus": {
+      "queued": "Wartet",
+      "running": "Läuft…",
+      "succeeded": "Fertig",
+      "failed": "Fehlgeschlagen",
+      "cancelled": "Abgebrochen",
+      "idle": "Bereit"
+    }
   },
   "topLogs": {
     "title": "Top-Logs",
