@@ -200,10 +200,16 @@ services:
       dockerfile: Dockerfile
     restart: unless-stopped
     environment:
-      # Cap on simc's thread pool per request. 0 = let simc decide (one
-      # per logical CPU). Lower this if simc starves the rest of the
-      # stack — e.g. on a shared dev box.
-      SIMC_DEFAULT_THREADS: ${SIMC_DEFAULT_THREADS:-0}
+      # Cap on simc's thread pool per request. simc's midnight HEAD has a
+      # race condition in the JSON serializer that hits Death Knight
+      # Unholy on DungeonSlice when many threads run concurrently —
+      # capping to 4 dodges it. The cost is wall-clock per sim (~3-5×
+      # slower than threads=20), but 5000-iter DK still finishes in
+      # under a minute on a serious box. Set to 0 to let simc auto-pick
+      # one thread per logical CPU — only safe with a known-clean simc
+      # build. Override per-rebuild by passing ``threads=`` in the
+      # /simulate payload from the backend.
+      SIMC_DEFAULT_THREADS: ${SIMC_DEFAULT_THREADS:-4}
       SIMC_TIMEOUT_S: ${SIMC_TIMEOUT_S:-1800}
       # Failed simc runs save the exact input.simc + args + log to this
       # directory so an admin can grab them via the named volume and
