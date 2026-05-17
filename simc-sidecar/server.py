@@ -579,10 +579,11 @@ def _build_args_and_profile(
 
     if rng_seed is not None:
         # ``deterministic`` pins simc's RNG to a known seed so the retry
-        # can't repeat the same segfault. Combined with ``rng=`` it
-        # gives us a clean re-roll without changing the player setup.
-        extra_args.append(f"deterministic=1")
-        extra_args.append(f"rng_seed={rng_seed}")
+        # can't repeat the same segfault path. The option name simc
+        # accepts is ``seed=`` (not ``rng_seed=`` — that's "Unknown
+        # option" and gets ignored).
+        extra_args.append("deterministic=1")
+        extra_args.append(f"seed={rng_seed}")
 
     return profile_text, extra_args
 
