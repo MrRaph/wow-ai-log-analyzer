@@ -40,8 +40,28 @@ cd "$SOURCE_DIR"
 # rebuild the image against a different branch via the Dockerfile
 # build arg; honour whatever branch git already has tracked.
 TRACKING_BRANCH=$(git symbolic-ref --short HEAD 2>/dev/null || echo midnight)
-git fetch --depth 1 origin "$TRACKING_BRANCH" 2>&1 || true
-git reset --hard FETCH_HEAD 2>&1
+# Need the full history when pinning to a specific commit — the image-
+# build did a ``--depth 1`` clone so older commits aren't reachable.
+# Convert to a full history on first pin attempt; cheap idempotent op.
+if [ -n "${SIMC_PIN_COMMIT:-}" ] && [ -f "$SOURCE_DIR/.git/shallow" ]; then
+    log "deepening shallow clone (one-off — needed to pin commit)"
+    git fetch --unshallow origin "$TRACKING_BRANCH" 2>&1 || git fetch origin "$TRACKING_BRANCH" 2>&1 || true
+else
+    git fetch --depth 50 origin "$TRACKING_BRANCH" 2>&1 || true
+fi
+
+if [ -n "${SIMC_PIN_COMMIT:-}" ]; then
+    # Pin to a known-stable commit. simc's ``midnight`` HEAD has a
+    # stochastic Death Knight Unholy DungeonSlice crash that we
+    # bisected to a commit between 2026-05-12 and 2026-05-17.
+    # Raidbots ships ``6fbd8ca634`` (May 12) which is crash-free in
+    # production — that's our default pin.
+    log "pinning simc to $SIMC_PIN_COMMIT (override SIMC_PIN_COMMIT='' to track branch HEAD)"
+    git fetch --depth 1 origin "$SIMC_PIN_COMMIT" 2>&1 || git fetch origin 2>&1 || true
+    git reset --hard "$SIMC_PIN_COMMIT" 2>&1
+else
+    git reset --hard FETCH_HEAD 2>&1
+fi
 log "simc branch=$TRACKING_BRANCH HEAD=$(git rev-parse --short HEAD)"
 
 log "== Step 2/6: pull live DBC data from WoW CDN =="
@@ -114,5 +134,19 @@ log "== Step 6/6: install new simc binary =="
 # Avoids the brief window where the file exists but isn't fully written.
 install -m 0755 "$NEW_BIN" "${TARGET_BIN}.new"
 mv "${TARGET_BIN}.new" "$TARGET_BIN"
+
+# Marker so the entrypoint knows this volume-cached simc was an
+# *explicit* admin rebuild and shouldn't be silently overwritten by
+# a newer image-bundled binary on next container start. Critical when
+# we pin to an older-but-stable commit: without this the entrypoint's
+# "newer wins" check would replace our deliberately-older stable
+# build with the crashier upstream image one.
+TARGET_DIR=$(dirname "$TARGET_BIN")
+{
+    echo "commit: $(cd "$SOURCE_DIR" && git rev-parse HEAD)"
+    echo "pinned: ${SIMC_PIN_COMMIT:-<head>}"
+    echo "built_at: $(date -u +%Y-%m-%dT%H:%M:%SZ)"
+} > "$TARGET_DIR/.built-by-sidecar"
+
 log "installed: $("$TARGET_BIN" spell_query=spell.id=1 2>&1 | head -1)"
 log "DONE"

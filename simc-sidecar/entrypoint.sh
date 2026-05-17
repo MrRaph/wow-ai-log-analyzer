@@ -43,6 +43,19 @@ BUNDLED_BANNER=$(probe "$BUNDLED/simc")
 echo "[entrypoint] volume  : ${ACTIVE_BANNER:-<missing>}"
 echo "[entrypoint] bundled : ${BUNDLED_BANNER:-<missing>}"
 
+# If the volume contains an admin-rebuilt binary (marker dropped by
+# rebuild-simc.sh), keep it unconditionally — even if the bundled is
+# nominally "newer". The admin may have deliberately pinned to an
+# older stable commit because the bundled regression caused crashes
+# in their build; the bundled binary updating itself silently would
+# undo that decision.
+if [ -f "$ACTIVE/.built-by-sidecar" ]; then
+    echo "[entrypoint] volume marker present — admin rebuild, keeping volume"
+    echo "[entrypoint] marker contents:"
+    sed 's/^/[entrypoint]   /' "$ACTIVE/.built-by-sidecar"
+    exec python3 -u /sidecar/server.py
+fi
+
 export ACTIVE_BANNER BUNDLED_BANNER
 NEWER=$(python3 - <<'PYEOF'
 import os

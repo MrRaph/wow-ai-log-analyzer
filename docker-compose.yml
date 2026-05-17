@@ -211,6 +211,14 @@ services:
       # /simulate payload from the backend.
       SIMC_DEFAULT_THREADS: ${SIMC_DEFAULT_THREADS:-4}
       SIMC_TIMEOUT_S: ${SIMC_TIMEOUT_S:-1800}
+      # Pin self-rebuild to a known-stable simc commit. ``midnight``
+      # HEAD has a regression that crashes Death Knight Unholy
+      # DungeonSlice runs ~10-30% of the time; raidbots production
+      # ships ``6fbd8ca634`` (May 12 2026), which our user verified is
+      # crash-free at 100k iterations × 32 threads. Set to empty to
+      # track branch HEAD instead (chasing latest at the cost of
+      # potentially picking up regressions).
+      SIMC_PIN_COMMIT: ${SIMC_PIN_COMMIT:-6fbd8ca634}
       # Failed simc runs save the exact input.simc + args + log to this
       # directory so an admin can grab them via the named volume and
       # bisect down to whatever item / item-thread interaction simc 1205
