@@ -32,7 +32,8 @@ USER root
 # disk cost is modest (~200 MB on top of the upstream image).
 RUN apk add --no-cache \
         python3 py3-pip ca-certificates \
-        git make cmake build-base linux-headers
+        git make cmake build-base linux-headers \
+        curl-dev openssl-dev
 
 # Pin the Python deps for our FastAPI wrapper + the simc data
 # pipeline (casc_extract.py + dbc_extract3 share ``requests``).
@@ -41,7 +42,8 @@ RUN python3 -m pip install --break-system-packages --no-cache-dir \
         "uvicorn[standard]==0.32.1" \
         "python-multipart==0.0.20" \
         "requests==2.32.3" \
-        "fixedint==0.2.0"
+        "fixedint==0.2.0" \
+        "bitarray==3.0.0"
 
 # Clone the simc source at image build time so the first rebuild
 # doesn't have to download ~50 MB of repo on a user-triggered call.

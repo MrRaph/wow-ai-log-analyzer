@@ -150,6 +150,8 @@
     "loadoutName": "Name",
     "loadoutNamePlaceholder": "Talentbaum {n}",
     "abilityOther": "Andere ({n} weitere)",
+    "comparisonTitle": "DPS-Vergleich — alle Kombinationen",
+    "comparisonHint": "{n} Läufe, Sieger liegt {delta}% vor dem zweiten",
     "rotationLabel": "Rotation",
     "rotation": {
       "simc_default": "SimC-Standard (Community-APL)",

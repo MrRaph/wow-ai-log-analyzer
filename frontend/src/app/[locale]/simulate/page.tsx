@@ -610,6 +610,12 @@ function SimulationDetail({ simulation, locale }: { simulation: Simulation; loca
         </p>
       )}
 
+      <AggregatedComparison
+        simulation={simulation}
+        winnerId={winner?.id ?? null}
+        locale={locale}
+      />
+
       <div className="overflow-x-auto">
         <table className="w-full text-sm">
           <thead className="bg-bg-2 text-xs uppercase tracking-wide text-zinc-400">
@@ -678,6 +684,105 @@ function SimulationDetail({ simulation, locale }: { simulation: Simulation; loca
     </Card>
   );
 }
+
+function AggregatedComparison({
+  simulation,
+  winnerId,
+  locale,
+}: {
+  simulation: Simulation;
+  winnerId: string | null;
+  locale: Locale;
+}) {
+  const t = useTranslations();
+  // One bar per (loadout × fight × rotation) combination that completed.
+  // Sorted descending so the strongest build is always on top — that's
+  // the question the user actually wants answered ("which combo wins?")
+  // and the table grid alone doesn't make it obvious when there are
+  // many axes.
+  const ranked = useMemo(() => {
+    return simulation.runs
+      .filter((r) => r.status === "succeeded")
+      .map((r) => ({
+        run: r,
+        label:
+          (simulation.loadouts[r.loadout_index]?.name ||
+            t("simulate.loadoutNamePlaceholder", { n: r.loadout_index + 1 })) +
+          " · " +
+          t(`simulate.fightProfile.${r.fight_profile_key}`) +
+          " · " +
+          t(`simulate.rotation.${r.rotation}`),
+      }))
+      .sort((a, b) => b.run.dps_mean - a.run.dps_mean);
+  }, [simulation.runs, simulation.loadouts, t]);
+
+  if (ranked.length < 2) return null;
+
+  const max = ranked[0]?.run.dps_mean ?? 1;
+  // The "ahead of next" delta gives a quick read on whether the winner
+  // is meaningfully better or within sim noise — both axes need to
+  // shift in the same direction for it to mean anything.
+  const winnerDelta = ranked[1] && max > 0
+    ? ((max - ranked[1].run.dps_mean) / max) * 100
+    : 0;
+
+  return (
+    <div className="rounded-md border border-bg-3 bg-bg-2/40 p-3">
+      <div className="mb-2 flex flex-wrap items-baseline justify-between gap-2">
+        <h3 className="text-sm font-semibold text-zinc-100">
+          {t("simulate.comparisonTitle")}
+        </h3>
+        <span className="text-xs text-zinc-500">
+          {t("simulate.comparisonHint", {
+            n: ranked.length,
+            delta: winnerDelta.toFixed(1),
+          })}
+        </span>
+      </div>
+      <div className="space-y-1.5">
+        {ranked.map(({ run, label }, i) => {
+          const bar = Math.max(2, Math.round((run.dps_mean / max) * 100));
+          const isWinner = run.id === winnerId;
+          return (
+            <div key={run.id} className="space-y-0.5">
+              <div className="flex items-baseline justify-between gap-2 text-xs">
+                <span
+                  className={`truncate ${
+                    isWinner ? "text-amber-300 font-medium" : "text-zinc-200"
+                  }`}
+                  title={label}
+                >
+                  {i + 1}. {label}
+                </span>
+                <span
+                  className={`shrink-0 tabular-nums ${
+                    isWinner ? "text-amber-300 font-semibold" : "text-zinc-300"
+                  }`}
+                >
+                  {formatNumber(run.dps_mean, locale)} DPS
+                  {i > 0 && (
+                    <span className="ml-1 text-zinc-500">
+                      ({(((run.dps_mean - max) / max) * 100).toFixed(1)}%)
+                    </span>
+                  )}
+                </span>
+              </div>
+              <div className="h-2.5 w-full overflow-hidden rounded-full bg-bg-3">
+                <div
+                  className={`h-full ${
+                    isWinner ? "bg-amber-400/80" : "bg-accent/70"
+                  }`}
+                  style={{ width: `${bar}%` }}
+                />
+              </div>
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
 
 function RunCell({
   run,

@@ -213,6 +213,16 @@ services:
       SIMC_CRASH_DUMP_DIR: /crashes
     volumes:
       - simc-crash-dumps:/crashes
+      # Persistent build cache. CASC content-addressable files are
+      # immutable so a populated cache reduces subsequent rebuild
+      # downloads from ~300 MB to <10 MB per WoW hotfix. The extracted
+      # ``wow/<build>/`` directory is keyed by build number — old
+      # builds linger until manually pruned. CMake's incremental
+      # build state in ``build/`` cuts compile time from ~15 min to
+      # ~1 min when only a few simc source files changed.
+      - simc-build-cache:/opt/simc-source/casc_extract/cache
+      - simc-wow-extract:/opt/simc-source/casc_extract/wow
+      - simc-build-artifacts:/opt/simc-source/build
     expose:
       - "8090"
     healthcheck:
@@ -231,3 +241,6 @@ volumes:
   redis-data:
   llama-cache:
   simc-crash-dumps:
+  simc-build-cache:
+  simc-wow-extract:
+  simc-build-artifacts:

@@ -81,22 +81,26 @@ fi
 
 log "== Step 4/6: regenerate simc data headers =="
 cd "$SOURCE_DIR/dbc_extract3"
-# ``generate.sh live <build> <input_base> [dbcache]`` is the upstream
-# entrypoint: it discovers DBFiles under ``<input_base>/<build>/`` and
-# optionally layers the admin-uploaded DBCache.bin on top via the
-# ``--hotfix=`` flag the script passes to dbc_extract.py.
+# generate.sh signature: ``[ptr] <build> <input_base> [hotfix]``.
+# The first positional ``ptr`` is OPTIONAL — for live builds we skip
+# it entirely (passing the string ``live`` was my earlier bug; the
+# script then treated "live" as the build identifier and crashed on
+# the malformed version string). Hotfix path is optional and only
+# applied when an admin-uploaded DBCache.bin is present.
 if [ -f "$SOURCE_DIR/dbc_extract3/cache/live/DBCache.bin" ]; then
     HOTFIX_ARG="$SOURCE_DIR/dbc_extract3/cache/live/DBCache.bin"
-    ./generate.sh live "$LIVE_BUILD" "$INPUT_BASE" "$HOTFIX_ARG" 2>&1 | tail -60
+    ./generate.sh "$LIVE_BUILD" "$INPUT_BASE" "$HOTFIX_ARG" 2>&1 | tail -60
 else
-    ./generate.sh live "$LIVE_BUILD" "$INPUT_BASE" 2>&1 | tail -60
+    ./generate.sh "$LIVE_BUILD" "$INPUT_BASE" 2>&1 | tail -60
 fi
 
 log "== Step 5/6: rebuild simc binary =="
 cd "$SOURCE_DIR"
 mkdir -p build
 cd build
-cmake -DCMAKE_BUILD_TYPE=Release -DSIMC_NO_NETWORKING=OFF .. 2>&1 | tail -10
+# ``BUILD_GUI=OFF`` skips the Qt-based SimulationCraft GUI — we only
+# need the CLI binary. Without this, cmake fails on missing Qt6.
+cmake -DCMAKE_BUILD_TYPE=Release -DBUILD_GUI=OFF .. 2>&1 | tail -15
 make -j"$JOBS" simc 2>&1 | tail -30
 
 NEW_BIN="$SOURCE_DIR/build/simc"

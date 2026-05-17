@@ -150,6 +150,8 @@
     "loadoutName": "Name",
     "loadoutNamePlaceholder": "Loadout {n}",
     "abilityOther": "Other ({n} more)",
+    "comparisonTitle": "DPS comparison — all combinations",
+    "comparisonHint": "{n} runs, winner leads next by {delta}%",
     "rotationLabel": "Rotation",
     "rotation": {
       "simc_default": "SimC default (community APL)",
