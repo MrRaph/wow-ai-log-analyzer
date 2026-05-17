@@ -892,23 +892,31 @@ async def _run_simc(req: SimulateRequest) -> dict[str, Any]:
         )
         last_profile = profile_text
 
-    # Retry #2: segfault. simc's signal handler dumps
-    # "sim_signal_handler: Segmentation fault!" and exits non-zero.
-    # Re-roll with a fixed seed so the crashed thread-init path isn't
-    # repeated. If the crash is item-deterministic this won't help —
-    # which is what _dump_crash exists for.
-    seg_hint = "Segmentation fault" in (out_text + err_text)
-    if (rc in (11, -11) or seg_hint) and data is None:
+    # Retry #2: segfault. simc midnight HEAD has a stochastic memory
+    # corruption bug for some DK Unholy DungeonSlice runs that triggers
+    # ~10-30% of the time and depends on memory layout / RNG, not on
+    # any user-controllable input. We retry up to 3 times with fresh
+    # seeds so the user usually gets through. If the crash is truly
+    # input-deterministic (rare), the _dump_crash path preserves the
+    # input for offline debugging.
+    needs_ds_inject = (
+        fight_style_lc == "dungeonslice"
+        and "Dungeon Slice is disabled" in (out_text + err_text)
+    )
+    for attempt in range(1, 4):
+        seg_hint = "Segmentation fault" in (out_text + err_text)
+        if not ((rc in (11, -11) or seg_hint) and data is None):
+            break
         new_seed = random.getrandbits(63)
         logger.warning(
-            "simc segfaulted (exit=%s) — retrying once with seed=%s",
+            "simc segfaulted (attempt %s, exit=%s) — retrying with seed=%s",
+            attempt,
             rc,
             new_seed,
         )
         profile_text, extra_args = _build_args_and_profile(
             req,
-            inject_dungeon_slice=(fight_style_lc == "dungeonslice"
-                                  and "Dungeon Slice is disabled" in (out_text + err_text)),
+            inject_dungeon_slice=needs_ds_inject,
             rng_seed=new_seed,
         )
         rc, out_text, err_text, data, last_args = await _run_simc_once(
