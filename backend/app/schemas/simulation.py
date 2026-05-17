@@ -63,6 +63,8 @@ class SimulationCreate(BaseModel):
 
 class SimulationAbility(BaseModel):
     name: str = ""
+    spell_id: int = 0
+    spell_name: str = ""
     school: str = ""
     dps: float = 0.0
     pct: float = 0.0

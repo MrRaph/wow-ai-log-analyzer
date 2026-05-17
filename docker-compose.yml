@@ -189,11 +189,11 @@ services:
   # and /healthz on :8090. The backend worker hits this on the compose
   # network — no Docker socket access needed for runs themselves.
   #
-  # Admins can pull the latest upstream simc daily (DBC data + binary)
-  # from the admin UI via ADMIN_DOCKER_CONTROL → docker-socket mount on
-  # the backend container.
+  # Part of the default stack (no compose profile) so /simulate works
+  # out of the box. Admins can bump to the latest upstream simc daily
+  # (DBC data + binary) from the admin UI via ADMIN_DOCKER_CONTROL →
+  # docker-socket mount on the backend container.
   simc:
-    profiles: ["simc"]
     image: ${SIMC_SIDECAR_IMAGE:-wow-ai-log-analyzer-simc-sidecar:latest}
     build:
       context: ./simc-sidecar

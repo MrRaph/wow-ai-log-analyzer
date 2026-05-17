@@ -478,6 +478,8 @@ export interface SimulationLoadoutIn {
 
 export interface SimulationAbility {
   name: string;
+  spell_id: number;
+  spell_name: string;
   school: string;
   dps: number;
   pct: number;

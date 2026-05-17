@@ -28,19 +28,21 @@ branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
 
 
-simulation_status = sa.Enum(
+simulation_status = postgresql.ENUM(
     "pending",
     "running",
     "succeeded",
     "failed",
     name="simulation_status",
+    create_type=False,
 )
-simulation_run_status = sa.Enum(
+simulation_run_status = postgresql.ENUM(
     "pending",
     "running",
     "succeeded",
     "failed",
     name="simulation_run_status",
+    create_type=False,
 )
 
 

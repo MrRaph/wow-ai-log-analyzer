@@ -17,7 +17,7 @@ beyond this branch), so the migration is purely additive. We backfill
 for any row Alembic finds, then drop the defaults so future rows must
 specify both explicitly.
 
-Revision ID: 0016_simulations_rotations_precision
+Revision ID: 0016_sim_rotations_precision
 Revises: 0015_simulations
 Create Date: 2026-05-17 03:00:00
 """
@@ -29,7 +29,7 @@ import sqlalchemy as sa
 from alembic import op
 from sqlalchemy.dialects import postgresql
 
-revision: str = "0016_simulations_rotations_precision"
+revision: str = "0016_sim_rotations_precision"
 down_revision: Union[str, None] = "0015_simulations"
 branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None

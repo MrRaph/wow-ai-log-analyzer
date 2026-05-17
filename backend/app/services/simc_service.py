@@ -89,7 +89,7 @@ def _strip_talent_lines(profile: str) -> str:
 
 
 def apply_loadout_talents(profile: str, loadout_talents: str) -> str:
-    """Replace the profile's talent block with the loadout's.
+    """Override the profile's talent block with the loadout's.
 
     ``loadout_talents`` may be one or more lines of the form
     ``talents=...`` / ``class_talents=...`` / ``spec_talents=...``
@@ -97,11 +97,17 @@ def apply_loadout_talents(profile: str, loadout_talents: str) -> str:
     drop the existing talent lines from the base profile and append
     the loadout's block so the rest of the profile (gear, stats,
     character meta) is preserved.
+
+    Crucially: if the loadout has *no* talents, we DON'T strip the
+    profile — we leave whatever the user pasted intact. Stripping
+    without replacing turns the character into a level-90 with zero
+    spec abilities and simc happily reports ~3000 DPS of auto-attacks
+    (a real bug we hit during local testing).
     """
-    stripped = _strip_talent_lines(profile).rstrip()
     talents = (loadout_talents or "").strip()
     if not talents:
-        return stripped + "\n"
+        return profile
+    stripped = _strip_talent_lines(profile).rstrip()
     return stripped + "\n\n# loadout talents\n" + talents + "\n"
 
 

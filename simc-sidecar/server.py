@@ -94,19 +94,32 @@ DEFAULT_CONSUMABLES: dict[str, str] = {
     "food": "feast_of_the_divine_day",
     "augmentation": "crystallized",
     "potion": "tempered_potion_3",
-    # Temporary weapon enchant. Honing rune is the current "best raid prep"
-    # consumable. Some specs benefit more than others; simc picks correctly.
-    "temporary_enchant": "main_hand:howling_rune_3/off_hand:howling_rune_3",
+    # NOTE: temporary_enchant is intentionally NOT defaulted. The right
+    # choice is spec-specific (DK runeforge, Rogue poison, weapon oil for
+    # casters, etc.) and the previously-bundled Howling Rune was actually
+    # ilvl-capped at 120 — silently inactive on any current-tier weapon
+    # and the source of confusing "requires a maximum ilevel of 120"
+    # warnings. We let the /simc paste provide it (or omit it).
 }
 
-# Global sim flags we always set when the user asks us to "assume full
-# raid prep". ``optimal_raid=1`` flips on every raid buff/debuff simc
-# knows about. ``override.bloodlust=1`` makes sure Heroism/BL ticks
-# even on fight styles that wouldn't otherwise grant it.
+# Sim flags for "assume full raid prep" — only applied to raid-shaped
+# fight styles (Patchwerk, Ultraxion, …). ``optimal_raid=1`` flips on
+# every standard raid buff/debuff and ``override.bloodlust=1`` makes
+# sure Heroism/Bloodlust is up for the whole fight (raid bosses
+# practically always get one).
+#
+# For DungeonSlice we deliberately DON'T apply these: simc's tuned M+
+# profile already models a 5-player group with the right buff coverage
+# and a single Bloodlust at pull start. Forcing optimal_raid + a
+# permanent BL on top of that overstates Mythic+ DPS by a chunk.
 RAID_PREP_GLOBAL_FLAGS = (
     "optimal_raid=1",
     "override.bloodlust=1",
 )
+
+# Fight styles that we treat as "raid encounter" (full raid prep).
+# DungeonSlice is intentionally absent — see the comment above.
+_RAID_PREP_FIGHT_STYLES = {"patchwerk", "ultraxion", "lightmovement"}
 
 JobStatus = Literal["queued", "running", "succeeded", "failed", "cancelled"]
 
@@ -457,9 +470,20 @@ def _parse_result(data: dict, fallback_dps_mean: float = 0.0) -> dict[str, Any]:
         if per_iter_damage <= 0:
             continue
         per_ability_dps = per_iter_damage / fight_length if fight_length else 0.0
+        # simc emits ``id`` (Blizzard's spell ID — matches wowhead) and
+        # ``spell_name`` (the localized English display name) on stats
+        # entries. Auto-attacks have id=0/1 + empty spell_name (special-
+        # cased on the frontend so we don't link them).
+        spell_id = stats.get("id")
+        try:
+            spell_id_int = int(spell_id) if spell_id is not None else 0
+        except (TypeError, ValueError):
+            spell_id_int = 0
         abilities.append(
             {
                 "name": stats.get("name") or "",
+                "spell_id": spell_id_int,
+                "spell_name": stats.get("spell_name") or "",
                 "school": stats.get("school") or "",
                 "damage_per_iter": per_iter_damage,
                 "dps": per_ability_dps,
@@ -518,15 +542,27 @@ async def _run_simc(req: SimulateRequest) -> dict[str, Any]:
         profile_text = _strip_action_lines(profile_text)
     # custom → leave the profile alone
 
+    fight_style_lc = req.fight_style.lower()
+
     if req.assume_raid_prep:
+        # Consumables are reasonable to assume for *any* serious sim
+        # (the user IS sim'ing a fully-prepped character) — but the
+        # global raid-buff and forced-bloodlust flags only make sense
+        # for actual raid encounters. DungeonSlice already models a
+        # 5-player group with one Bloodlust at pull start; layering
+        # optimal_raid + a permanent BL on top inflates M+ DPS.
         profile_text = _inject_consumable_defaults(profile_text)
-        extra_args.extend(RAID_PREP_GLOBAL_FLAGS)
+        if fight_style_lc in _RAID_PREP_FIGHT_STYLES:
+            extra_args.extend(RAID_PREP_GLOBAL_FLAGS)
 
     # DungeonSlice (simc's canonical M+ profile) is gated per-spec because
-    # not every spec has a tuned M+ APL. The flag is global; we always
-    # set it for DungeonSlice runs and let simc pick the per-spec APL.
-    if req.fight_style.lower() == "dungeonslice":
-        extra_args.append("enable_dungeon_slice=1")
+    # not every spec has a tuned M+ APL. ``enable_dungeon_slice=1`` is a
+    # *player option*, not a top-level sim option: passing it as a CLI
+    # arg trips simc's "Unknown option" warning and is ignored. It needs
+    # to live inside the profile body so simc applies it to the player
+    # being constructed.
+    if fight_style_lc == "dungeonslice":
+        profile_text = profile_text.rstrip() + "\nenable_dungeon_slice=1\n"
 
     with tempfile.TemporaryDirectory(prefix="simc-") as workdir:
         wd = Path(workdir)

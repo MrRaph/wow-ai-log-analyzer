@@ -1,7 +1,7 @@
 "use client";
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Loader2, Plus, Sparkles, Sword, Trash2, Wand2 } from "lucide-react";
+import { Loader2, Sparkles, Sword, Trash2, Wand2 } from "lucide-react";
 import { useTranslations } from "next-intl";
 import { use, useEffect, useMemo, useState } from "react";
 
@@ -11,6 +11,8 @@ import { Button, Card, FieldError, Input, Label } from "@/components/ui";
 import type { Locale } from "@/i18n/config";
 import { ApiClientError, apiFetch } from "@/lib/api";
 import { formatDateTime, formatNumber } from "@/lib/format";
+import { parseSimcLoadouts, type DetectedLoadout } from "@/lib/simcParse";
+import { spellUrl } from "@/lib/wowhead";
 import type {
   PaginatedSimulations,
   SidecarStatus,
@@ -18,7 +20,6 @@ import type {
   SimcRotation,
   Simulation,
   SimulationInfo,
-  SimulationLoadoutIn,
   SimulationRunOut,
 } from "@/types/api";
 
@@ -50,14 +51,51 @@ function SimulateView({ locale }: { locale: Locale }) {
   const [selectedRotations, setSelectedRotations] = useState<SimcRotation[]>([
     "simc_default",
   ]);
-  const [loadouts, setLoadouts] = useState<SimulationLoadoutIn[]>([
-    { name: "", talents: "" },
-  ]);
+  // Auto-detected loadouts are keyed by their full ``talents=...`` line
+  // (unique per loadout). Selection survives profile edits as long as
+  // the talents string is unchanged.
+  const [selectedTalentKeys, setSelectedTalentKeys] = useState<Set<string>>(
+    new Set(),
+  );
   const [precision, setPrecision] = useState<Precision>("precise");
   const [activeSimulationId, setActiveSimulationId] = useState<string | null>(null);
   const [err, setErr] = useState<string | null>(null);
 
   const maxLoadouts = infoQ.data?.max_loadouts ?? 3;
+
+  // Reparse on every profile change. Cheap (regex), kept memoised so
+  // the checkbox row identity is stable across renders.
+  const detectedLoadouts: DetectedLoadout[] = useMemo(
+    () => parseSimcLoadouts(profile),
+    [profile],
+  );
+
+  // When a fresh profile lands, default-select the *active* loadout
+  // (the one without ``#`` comments). Re-runs whenever the set of
+  // detected loadouts changes, but only triggers if the user hadn't
+  // already picked something for this profile.
+  useEffect(() => {
+    if (detectedLoadouts.length === 0) {
+      setSelectedTalentKeys(new Set());
+      return;
+    }
+    // Drop selections that no longer exist (profile was edited).
+    setSelectedTalentKeys((prev) => {
+      const valid = new Set(detectedLoadouts.map((l) => l.talents));
+      const kept = new Set<string>();
+      for (const k of prev) if (valid.has(k)) kept.add(k);
+      if (kept.size === 0) {
+        const first = detectedLoadouts.find((l) => l.isActive) ?? detectedLoadouts[0];
+        if (first) kept.add(first.talents);
+      }
+      return kept;
+    });
+  }, [detectedLoadouts]);
+
+  const selectedLoadouts: DetectedLoadout[] = useMemo(
+    () => detectedLoadouts.filter((l) => selectedTalentKeys.has(l.talents)),
+    [detectedLoadouts, selectedTalentKeys],
+  );
 
   const myListQ = useQuery({
     queryKey: ["my-simulations"],
@@ -91,7 +129,10 @@ function SimulateView({ locale }: { locale: Locale }) {
           simc_profile: profile,
           fight_profiles: selectedFights,
           rotations: selectedRotations,
-          loadouts,
+          loadouts: selectedLoadouts.slice(0, maxLoadouts).map((l) => ({
+            name: l.name,
+            talents: l.talents,
+          })),
           precision,
         },
       }),
@@ -132,24 +173,29 @@ function SimulateView({ locale }: { locale: Locale }) {
     );
   }
 
-  function updateLoadout(i: number, patch: Partial<SimulationLoadoutIn>) {
-    setLoadouts((prev) =>
-      prev.map((ld, idx) => (idx === i ? { ...ld, ...patch } : ld)),
-    );
-  }
-  function addLoadout() {
-    if (loadouts.length >= maxLoadouts) return;
-    setLoadouts((prev) => [...prev, { name: "", talents: "" }]);
-  }
-  function removeLoadout(i: number) {
-    setLoadouts((prev) => prev.filter((_, idx) => idx !== i));
+  function toggleTalentKey(key: string) {
+    setSelectedTalentKeys((prev) => {
+      const next = new Set(prev);
+      if (next.has(key)) {
+        next.delete(key);
+        if (next.size === 0) {
+          // Don't let the user disable every loadout — re-add the one
+          // they just un-ticked.
+          next.add(key);
+        }
+      } else {
+        if (next.size >= maxLoadouts) return prev;
+        next.add(key);
+      }
+      return next;
+    });
   }
 
   const submitDisabled =
     !profile.trim() ||
     selectedFights.length === 0 ||
     selectedRotations.length === 0 ||
-    loadouts.length === 0 ||
+    selectedLoadouts.length === 0 ||
     createMut.isPending;
 
   const sidecarBadge = infoQ.data
@@ -165,7 +211,7 @@ function SimulateView({ locale }: { locale: Locale }) {
   }, [infoQ.data]);
 
   const totalRuns =
-    selectedFights.length * selectedRotations.length * loadouts.length;
+    selectedFights.length * selectedRotations.length * selectedLoadouts.length;
 
   return (
     <div className="container-page space-y-6">
@@ -287,68 +333,59 @@ function SimulateView({ locale }: { locale: Locale }) {
         </div>
 
         <div>
-          <div className="flex items-center justify-between">
-            <Label>{t("simulate.loadoutsLabel")}</Label>
-            <Button
-              type="button"
-              size="sm"
-              variant="secondary"
-              onClick={addLoadout}
-              disabled={loadouts.length >= maxLoadouts}
-              className="inline-flex items-center gap-1"
-            >
-              <Plus className="h-3.5 w-3.5" />
-              {t("simulate.addLoadout")}
-            </Button>
-          </div>
+          <Label>{t("simulate.loadoutsLabel")}</Label>
           <p className="mb-2 text-xs text-zinc-500">
-            {t("simulate.loadoutsHint", { max: maxLoadouts })}
+            {detectedLoadouts.length === 0
+              ? t("simulate.loadoutsNoneDetected")
+              : t("simulate.loadoutsDetectedHint", {
+                  count: detectedLoadouts.length,
+                  max: maxLoadouts,
+                })}
           </p>
-          <div className="space-y-3">
-            {loadouts.map((ld, i) => (
-              <div
-                key={i}
-                className="rounded-md border border-bg-3 bg-bg-2/40 p-3 space-y-2"
-              >
-                <div className="flex flex-wrap items-end gap-3">
-                  <div className="flex-1 min-w-[200px]">
-                    <Label htmlFor={`ld-name-${i}`}>{t("simulate.loadoutName")}</Label>
-                    <Input
-                      id={`ld-name-${i}`}
-                      value={ld.name}
-                      onChange={(e) => updateLoadout(i, { name: e.target.value })}
-                      placeholder={t("simulate.loadoutNamePlaceholder", { n: i + 1 })}
-                      maxLength={120}
+          {detectedLoadouts.length > 0 && (
+            <div className="space-y-1.5">
+              {detectedLoadouts.map((ld) => {
+                const checked = selectedTalentKeys.has(ld.talents);
+                const disabled =
+                  !checked && selectedTalentKeys.size >= maxLoadouts;
+                return (
+                  <label
+                    key={ld.talents}
+                    className={`flex items-start gap-3 rounded-md border px-3 py-2 text-sm cursor-pointer ${
+                      checked
+                        ? "border-accent bg-accent/10"
+                        : disabled
+                          ? "border-bg-3 bg-bg-2/40 opacity-60 cursor-not-allowed"
+                          : "border-bg-3 bg-bg-2/40 hover:border-zinc-500"
+                    }`}
+                  >
+                    <input
+                      type="checkbox"
+                      className="mt-0.5 h-4 w-4 accent-accent"
+                      checked={checked}
+                      disabled={disabled}
+                      onChange={() => toggleTalentKey(ld.talents)}
                     />
-                  </div>
-                  {loadouts.length > 1 && (
-                    <Button
-                      type="button"
-                      size="sm"
-                      variant="danger"
-                      onClick={() => removeLoadout(i)}
-                      title={t("simulate.removeLoadout")}
-                      aria-label={t("simulate.removeLoadout")}
-                    >
-                      <Trash2 className="h-4 w-4" />
-                    </Button>
-                  )}
-                </div>
-                <div>
-                  <Label htmlFor={`ld-talents-${i}`}>{t("simulate.talentsLabel")}</Label>
-                  <p className="mb-1 text-xs text-zinc-500">{t("simulate.talentsHint")}</p>
-                  <textarea
-                    id={`ld-talents-${i}`}
-                    value={ld.talents}
-                    onChange={(e) => updateLoadout(i, { talents: e.target.value })}
-                    placeholder="talents=..."
-                    spellCheck={false}
-                    className="h-24 w-full rounded-md border border-bg-3 bg-bg-2 px-3 py-2 font-mono text-xs text-zinc-100 placeholder:text-zinc-500 focus:border-accent focus:outline-none focus:ring-2 focus:ring-accent/50"
-                  />
-                </div>
-              </div>
-            ))}
-          </div>
+                    <div className="min-w-0 flex-1">
+                      <div className="flex items-baseline gap-2">
+                        <span className="font-medium text-zinc-100">
+                          {ld.name}
+                        </span>
+                        {ld.isActive && (
+                          <span className="rounded bg-emerald-500/20 px-1.5 py-0.5 text-[10px] uppercase tracking-wide text-emerald-300">
+                            {t("simulate.loadoutActiveBadge")}
+                          </span>
+                        )}
+                      </div>
+                      <div className="mt-0.5 truncate font-mono text-[11px] text-zinc-500">
+                        {ld.talents}
+                      </div>
+                    </div>
+                  </label>
+                );
+              })}
+            </div>
+          )}
         </div>
 
         <FieldError>{err}</FieldError>
@@ -442,6 +479,32 @@ function SimulationDetail({ simulation, locale }: { simulation: Simulation; loca
   const t = useTranslations();
   const runs = simulation.runs;
   const isWorking = simulation.status === "pending" || simulation.status === "running";
+
+  // Nudge the wowhead tooltip script to attach to the newly-rendered
+  // spell links every time a fresh run finishes (the polling cycle
+  // brings them in incrementally). Retry briefly so we still attach
+  // even if the script hasn't fully loaded yet.
+  const succeededCount = runs.filter((r) => r.status === "succeeded").length;
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    let attempts = 0;
+    let cancelled = false;
+    const tryRefresh = () => {
+      if (cancelled) return;
+      const wh = window.$WowheadPower;
+      if (wh && typeof wh.refreshLinks === "function") {
+        wh.refreshLinks();
+        return;
+      }
+      attempts += 1;
+      if (attempts < 20) window.setTimeout(tryRefresh, 250);
+    };
+    const timer = window.setTimeout(tryRefresh, 50);
+    return () => {
+      cancelled = true;
+      window.clearTimeout(timer);
+    };
+  }, [succeededCount]);
 
   // Sidecar queue hint — only fetched while this sim is queued *and*
   // nothing of ours is running yet, so we don't spam the endpoint
@@ -663,6 +726,18 @@ function RunCell({
   );
 }
 
+function _prettyAbilityName(raw: string): string {
+  // simc emits snake_case identifiers ("burning_blades", "auto_attack_mh").
+  // Title-case them for display; keep the original around so we can still
+  // ship spell-id mapping later without yet another rename round-trip.
+  return raw
+    .split("_")
+    .filter((p) => p.length > 0)
+    .map((p) => p.charAt(0).toUpperCase() + p.slice(1))
+    .join(" ");
+}
+
+
 function RunBreakdown({
   run,
   simulation,
@@ -673,6 +748,7 @@ function RunBreakdown({
   locale: Locale;
 }) {
   const t = useTranslations();
+
   if (run.status !== "succeeded") {
     if (run.status === "failed") {
       return (
@@ -690,39 +766,80 @@ function RunBreakdown({
     }
     return null;
   }
-  const top = run.abilities.slice(0, 15);
+
+  const top = run.abilities.slice(0, 10);
+  const rest = run.abilities.slice(10);
+  // Aggregate everything past the top 10 into an "Other" bucket. Pct is
+  // additive on the same base (total damage); dps adds linearly too.
+  const otherDps = rest.reduce((acc, a) => acc + a.dps, 0);
+  const otherPct = rest.reduce((acc, a) => acc + a.pct, 0);
+  const max = top[0]?.dps ?? 1;
+
   return (
-    <details className="rounded-md border border-bg-3 bg-bg-2/40 p-3">
+    <details className="rounded-md border border-bg-3 bg-bg-2/40 p-3" open>
       <summary className="cursor-pointer text-sm font-medium text-zinc-100">
         {runHeader(run, simulation, t, locale)}
       </summary>
-      <div className="mt-3 overflow-x-auto">
-        <table className="w-full text-sm">
-          <thead className="text-xs uppercase tracking-wide text-zinc-500">
-            <tr>
-              <th className="px-2 py-1 text-left">{t("simulate.abilityCol")}</th>
-              <th className="px-2 py-1 text-right">DPS</th>
-              <th className="px-2 py-1 text-right">%</th>
-              <th className="px-2 py-1 text-right">{t("simulate.executesCol")}</th>
-            </tr>
-          </thead>
-          <tbody>
-            {top.map((a, i) => (
-              <tr key={`${a.name}-${i}`} className="border-t border-bg-3">
-                <td className="px-2 py-1">{a.name}</td>
-                <td className="px-2 py-1 text-right tabular-nums">
-                  {formatNumber(a.dps, locale)}
-                </td>
-                <td className="px-2 py-1 text-right tabular-nums text-zinc-400">
-                  {a.pct.toFixed(1)}%
-                </td>
-                <td className="px-2 py-1 text-right tabular-nums text-zinc-500">
-                  {formatNumber(a.executes, locale)}
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
+      <div className="mt-3 space-y-1.5">
+        {top.map((a, i) => {
+          const bar = Math.max(2, Math.round((a.dps / max) * 100));
+          // Auto-attack stats entries come in with id=0/1 and an empty
+          // spell_name — they're not real spells so we don't wowhead-link
+          // them, just render the snake_case name in Title Case.
+          const isLinkable = a.spell_id > 0 && a.spell_name.length > 0;
+          const displayName = a.spell_name || _prettyAbilityName(a.name);
+          return (
+            <div key={`${a.name}-${i}-${a.spell_id}`} className="space-y-0.5">
+              <div className="flex items-baseline justify-between gap-2 text-xs">
+                <span className="truncate text-zinc-200" title={a.name}>
+                  {i + 1}.{" "}
+                  {isLinkable ? (
+                    <a
+                      href={spellUrl(a.spell_id, locale)}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      data-wh-icon-size="small"
+                      className="text-accent hover:underline"
+                    >
+                      {displayName}
+                    </a>
+                  ) : (
+                    displayName
+                  )}
+                </span>
+                <span className="shrink-0 tabular-nums text-zinc-300">
+                  {formatNumber(a.dps, locale)} DPS{" "}
+                  <span className="text-zinc-500">({a.pct.toFixed(1)}%)</span>
+                </span>
+              </div>
+              <div className="h-2 w-full overflow-hidden rounded-full bg-bg-3">
+                <div
+                  className="h-full bg-accent/80"
+                  style={{ width: `${bar}%` }}
+                />
+              </div>
+            </div>
+          );
+        })}
+        {rest.length > 0 && otherDps > 0 && (
+          <div className="space-y-0.5">
+            <div className="flex items-baseline justify-between gap-2 text-xs">
+              <span className="text-zinc-400">
+                {t("simulate.abilityOther", { n: rest.length })}
+              </span>
+              <span className="shrink-0 tabular-nums text-zinc-400">
+                {formatNumber(otherDps, locale)} DPS{" "}
+                <span className="text-zinc-500">({otherPct.toFixed(1)}%)</span>
+              </span>
+            </div>
+            <div className="h-2 w-full overflow-hidden rounded-full bg-bg-3">
+              <div
+                className="h-full bg-zinc-500/60"
+                style={{ width: `${Math.max(2, Math.round((otherDps / max) * 100))}%` }}
+              />
+            </div>
+          </div>
+        )}
       </div>
     </details>
   );
