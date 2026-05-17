@@ -755,11 +755,23 @@ async def _run_simc(req: SimulateRequest) -> dict[str, Any]:
 
     if rc != 0 and data is None:
         dump = _dump_crash(last_profile, last_args, out_text, err_text)
+        # Reproducible segfaults after a seed-re-roll retry are simc
+        # internal bugs (commonly a class-module bug for a specific
+        # talent/item combination). Word the error so the user
+        # doesn't think it's a UI/input problem.
+        seg_hint = "Segmentation fault" in (out_text + err_text)
+        if seg_hint:
+            detail = (
+                "simc crashed internally on this profile (segfault). "
+                "This is a known class of bug in the simc binary — the same "
+                "build can run a different talent loadout cleanly. Try a "
+                "different talent build, or bump the simc image to the latest "
+                "daily via Admin → SimulationCraft → 'Pull latest + recreate'."
+            )
+        else:
+            detail = (err_text or out_text)[-1500:]
         suffix = f" (crash dump: {dump})" if dump else ""
-        raise HTTPException(
-            400,
-            f"simc exit {rc}: {(err_text or out_text)[-1500:]}{suffix}",
-        )
+        raise HTTPException(400, f"simc exit {rc}: {detail}{suffix}")
     if data is None:
         dump = _dump_crash(last_profile, last_args, out_text, err_text)
         suffix = f" (crash dump: {dump})" if dump else ""
