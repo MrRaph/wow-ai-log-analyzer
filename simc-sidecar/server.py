@@ -245,6 +245,21 @@ def _parse_result(data: dict, fallback_dps_mean: float = 0.0) -> dict[str, Any]:
     for a in abilities:
         a["pct"] = (a["dps"] / total_dps * 100.0) if total_dps else 0.0
 
+    # simc emits ``version`` as either a string (older builds) or a dict
+    # with ``git_revision`` (newer builds). Be defensive about both shapes.
+    version_node = data.get("version")
+    if isinstance(version_node, dict):
+        build = version_node.get("git_revision")
+    elif isinstance(version_node, str):
+        build = version_node
+    else:
+        build = None
+
+    target_error_node = sim.get("target_error")
+    target_error_actual = (
+        target_error_node.get("dps") if isinstance(target_error_node, dict) else None
+    )
+
     return {
         "dps_mean": dps_mean,
         "dps_min": _stat("dps", "min"),
@@ -252,14 +267,8 @@ def _parse_result(data: dict, fallback_dps_mean: float = 0.0) -> dict[str, Any]:
         "dps_stddev": _stat("dps", "std_dev"),
         "fight_length_mean": fight_length,
         "iterations": sim.get("iterations"),
-        "target_error_actual": (sim.get("target_error") or {}).get("dps")
-        if isinstance(sim.get("target_error"), dict)
-        else None,
-        "build_version": (
-            (data.get("version") or {}).get("git_revision")
-            or sim.get("build_version")
-            or data.get("build_version")
-        ),
+        "target_error_actual": target_error_actual,
+        "build_version": build or sim.get("build_version") or data.get("build_version"),
         "player_name": player.get("name"),
         "player_spec": player.get("specialization") or player.get("talent_tree"),
         "player_class": player.get("class"),
@@ -290,6 +299,12 @@ async def simulate(req: SimulateRequest) -> dict[str, Any]:
     if req.assume_raid_prep:
         profile_text = _inject_consumable_defaults(profile_text)
         extra_args.extend(RAID_PREP_GLOBAL_FLAGS)
+
+    # DungeonSlice (simc's canonical M+ profile) is gated per-spec because
+    # not every spec has a tuned M+ APL. The flag is global; we always
+    # set it for DungeonSlice runs and let simc pick the per-spec APL.
+    if req.fight_style.lower() == "dungeonslice":
+        extra_args.append("enable_dungeon_slice=1")
 
     with tempfile.TemporaryDirectory(prefix="simc-") as workdir:
         wd = Path(workdir)
