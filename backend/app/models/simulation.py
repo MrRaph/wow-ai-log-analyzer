@@ -74,17 +74,27 @@ class Simulation(Base, TimestampMixin):
     # handing the profile to the sidecar). We keep the full text so
     # we can recompute deterministically if a sim has to be re-queued.
     simc_profile: Mapped[str] = mapped_column(Text, nullable=False)
-    # Loadouts the user submitted. Each entry is
-    # ``{"name": str, "talents": str, "rotation": "simc_default" | "blizzard" | "custom"}``.
+    # Loadouts the user submitted. Each entry is ``{"name": str, "talents": str}``.
     # ``talents`` is the talent-string portion only (without the rest of
     # the /simc profile); the worker substitutes the matching
     # ``talents=``/``class_talents=``/``spec_talents=`` line(s) in.
     loadouts: Mapped[list] = mapped_column(JSONType, default=list, nullable=False)
-    # Selected fight profiles. Each entry is
-    # ``{"key": "single_target" | "council" | "mythic_plus", ...}`` —
-    # the worker maps these to simc fight_style + desired_targets.
+    # Selected fight profiles. Each entry is one of
+    # ``"single_target" | "council" | "mythic_plus"`` — the worker maps
+    # them to simc fight_style + desired_targets.
     fight_profiles: Mapped[list] = mapped_column(JSONType, default=list, nullable=False)
+    # Rotation modes the user wants to compare against. Each entry is one of
+    # ``"simc_default" | "blizzard" | "custom"``. The cartesian product
+    # ``loadouts × fight_profiles × rotations`` becomes the per-row
+    # ``simulation_runs`` table — so checking "Blizzard one-button" alongside
+    # "Community APL" automatically yields a side-by-side comparison.
+    rotations: Mapped[list] = mapped_column(JSONType, default=list, nullable=False)
     iterations: Mapped[int] = mapped_column(default=5000, nullable=False)
+    # Symbolic precision band the iteration count came from. Kept on the
+    # row so the UI can show "fast / medium / precise" rather than just
+    # the raw number, and so a future migration can recompute iterations
+    # if we tune the presets.
+    precision: Mapped[str] = mapped_column(String(16), default="precise", nullable=False)
     status: Mapped[SimulationStatus] = mapped_column(
         PgEnum(SimulationStatus, name="simulation_status"),
         default=SimulationStatus.pending,

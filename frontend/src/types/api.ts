@@ -469,11 +469,11 @@ export interface TopLogsCurrentTierResponse {
 export type SimcRotation = "simc_default" | "blizzard" | "custom";
 export type SimcFightProfile = "single_target" | "council" | "mythic_plus";
 export type SimulationStatus = "pending" | "running" | "succeeded" | "failed";
+export type SimcPrecision = "fast" | "medium" | "precise";
 
 export interface SimulationLoadoutIn {
   name: string;
   talents: string;
-  rotation: SimcRotation;
 }
 
 export interface SimulationAbility {
@@ -515,7 +515,9 @@ export interface Simulation {
   simc_profile: string;
   loadouts: SimulationLoadoutIn[];
   fight_profiles: SimcFightProfile[];
+  rotations: SimcRotation[];
   iterations: number;
+  precision: SimcPrecision;
   status: SimulationStatus;
   error: string | null;
   started_at: string | null;
@@ -531,7 +533,9 @@ export interface SimulationListItem {
   label: string;
   status: SimulationStatus;
   iterations: number;
+  precision: SimcPrecision;
   fight_profiles: SimcFightProfile[];
+  rotations: SimcRotation[];
   loadout_count: number;
   created_at: string;
   finished_at: string | null;
@@ -553,11 +557,20 @@ export interface SimulationInfo {
     label_de: string;
   }>;
   rotations: SimcRotation[];
+  precisions: Array<{ key: "fast" | "medium" | "precise"; iterations: number }>;
+  default_precision: "fast" | "medium" | "precise";
   default_iterations: number;
   max_loadouts: number;
   retention_days: number;
   simc_build: string;
   sidecar_reachable: boolean;
+}
+
+export interface SidecarStatus {
+  reachable: boolean;
+  queued: number;
+  running: number;
+  max_concurrent: number;
 }
 
 export interface SimcStatus {

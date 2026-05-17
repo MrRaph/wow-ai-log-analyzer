@@ -130,8 +130,21 @@
       "council": "Raid — Council (3 bosses)",
       "mythic_plus": "Mythic+ pulls (DungeonSlice)"
     },
+    "rotationModesLabel": "Rotation modes to compare",
+    "rotationModesHint": "Pick one or more. Each ticked mode is simulated against every loadout × fight profile, so adding 'Blizzard One-Button' gives you a direct with/without comparison.",
+    "precisionLabel": "Precision",
+    "precision": {
+      "fast": "Fast",
+      "medium": "Medium",
+      "precise": "Precise"
+    },
+    "totalRuns": "{n} total simulation runs",
+    "progressRuns": "{done} of {total} runs complete",
+    "progressRunning": "{n} running",
+    "queueHint": "Sidecar busy: {running} running, {queued} ahead in queue. We'll start as soon as a slot opens.",
+    "queueWaitingForWorker": "Waiting for a free worker slot…",
     "loadoutsLabel": "Talent loadouts",
-    "loadoutsHint": "Compare up to {max} talent builds in one run. Each combination of (loadout × fight profile) becomes a separate sim.",
+    "loadoutsHint": "Compare up to {max} talent builds in one run. Each combination of (loadout × fight × rotation) becomes a separate sim.",
     "addLoadout": "Add loadout",
     "removeLoadout": "Remove loadout",
     "loadoutName": "Name",

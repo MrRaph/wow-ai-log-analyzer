@@ -1,30 +1,37 @@
-"""SimC sidecar — thin HTTP wrapper around the simc binary.
+"""SimC sidecar — async-job HTTP wrapper around the simc binary.
 
 Endpoints
 ---------
-GET  /healthz   liveness + simc bin path
-GET  /version   simc git revision banner
-POST /simulate  run one simulation and return parsed DPS + ability breakdown
+GET    /healthz             liveness + simc bin path
+GET    /version             simc git revision banner
+POST   /simulate            queue a simulation; returns 202 + {job_id}
+GET    /jobs/{job_id}       poll status / fetch result
+GET    /jobs                list active + recently-finished jobs
+DELETE /jobs/{job_id}       cancel a queued/running job (best-effort)
 
-Why a sidecar
--------------
-We don't want simc shelled out from inside the backend container — that
-would couple a 200+ MB C++ runtime to every backend image, and pulling
-the upstream image gives us a daily-rebuilt binary that tracks WoW patch
-data for free. The worker container hits this sidecar over the compose
-network.
+Why a job queue instead of a synchronous POST
+---------------------------------------------
+A single simc run can take 30 s to 5 min and pins every available CPU.
+Holding the HTTP connection open the whole time blocks the caller (the
+backend arq worker), and serving more than one simc at a time on the
+same box just thrashes the CPU cache.
+
+The queue lets us decouple submission from execution and apply a
+concurrency cap (``SIMC_MAX_CONCURRENT``, default 1). Multiple backend
+workers submitting in parallel each get an immediate ``202`` and a
+job_id; the sidecar serialises execution and the workers poll on a
+short interval. Finished jobs stay in memory for ``SIMC_JOB_RETENTION_S``
+(default 1 h) so the poll can still fetch results after completion.
 
 Rotation modes
 --------------
-A profile that came from the in-game ``/simc`` command never has
-``actions=`` lines, so without further input simc auto-loads the
-community-maintained default APL for the spec (near-optimal play).
-For users who want to compare that against Blizzard's in-game
-single-button-assist system we pass ``use_blizzard_action_list=1``,
-which is simc's native switch for that mode (see the simc wiki
-ActionLists page). When ``rotation == "blizzard"`` we also strip any
-``actions=`` lines from the input as a belt-and-braces measure so a
-user-edited profile can't accidentally override the flag.
+A /simc paste from in-game never has ``actions=`` lines, so without
+further input simc auto-loads the community-maintained default APL for
+the spec (near-optimal play). For users who want to compare against
+Blizzard's in-game single-button-assist system we pass
+``use_blizzard_action_list=1`` (simc wiki: ActionLists page). When
+``rotation == "blizzard"`` we also strip any ``actions=`` lines from the
+input as belt-and-braces.
 """
 from __future__ import annotations
 
@@ -34,8 +41,11 @@ import logging
 import os
 import shutil
 import tempfile
+import time
+import uuid
+from dataclasses import asdict, dataclass, field
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 
 import uvicorn
 from fastapi import FastAPI, HTTPException
@@ -53,7 +63,7 @@ logging.basicConfig(
 SIMC_BIN = os.environ.get("SIMC_BIN") or shutil.which("simc") or "/app/SimulationCraft/simc"
 
 # Per-request timeout (seconds). Single-target 5000 iter on a fast box
-# is typically 20-60s; M+ DungeonSlice can creep into minutes. 30 min
+# is typically 20-60 s; M+ DungeonSlice can creep into minutes. 30 min
 # is well over any realistic ceiling for our biggest fight profile.
 SIM_TIMEOUT_S = int(os.environ.get("SIMC_TIMEOUT_S", "1800"))
 
@@ -61,6 +71,17 @@ SIM_TIMEOUT_S = int(os.environ.get("SIMC_TIMEOUT_S", "1800"))
 # (typically one per logical CPU). The prod box has many cores so we
 # leave this on auto by default.
 DEFAULT_THREADS = int(os.environ.get("SIMC_DEFAULT_THREADS", "0") or "0")
+
+# How many simulations may run *simultaneously* inside this sidecar.
+# Default 1 because each simc uses every available core; two concurrent
+# sims would halve both throughputs without improving wall-clock. Bump
+# this if you ever cap ``SIMC_DEFAULT_THREADS`` to a fraction of CPUs.
+MAX_CONCURRENT = int(os.environ.get("SIMC_MAX_CONCURRENT", "1") or "1")
+
+# How long to keep finished/failed jobs in memory so the backend's poll
+# can still pick up the result after the run completed. 1 h is plenty;
+# the backend usually polls within a few seconds of completion.
+JOB_RETENTION_S = int(os.environ.get("SIMC_JOB_RETENTION_S", "3600") or "3600")
 
 # Current-patch player consumable defaults. /simc paste from in-game
 # normally has none of these, but the user expects us to assume "best
@@ -87,7 +108,34 @@ RAID_PREP_GLOBAL_FLAGS = (
     "override.bloodlust=1",
 )
 
-app = FastAPI(title="simc-sidecar")
+JobStatus = Literal["queued", "running", "succeeded", "failed", "cancelled"]
+
+
+@dataclass
+class Job:
+    id: str
+    status: JobStatus = "queued"
+    request: dict = field(default_factory=dict)
+    result: dict | None = None
+    error: str | None = None
+    log_tail: str = ""
+    created_at: float = field(default_factory=time.time)
+    started_at: float | None = None
+    finished_at: float | None = None
+    task: asyncio.Task | None = None
+
+
+# Jobs live in process memory. Keyed by job_id. The lock guards writes;
+# reads tolerate transient inconsistency since the worst case is a
+# missed "succeeded" status that's picked up on the next poll.
+_jobs: dict[str, Job] = {}
+_jobs_lock = asyncio.Lock()
+_semaphore: asyncio.Semaphore  # initialised in lifespan
+
+
+# ---------------------------------------------------------------------------
+# Pydantic request body
+# ---------------------------------------------------------------------------
 
 
 class SimulateRequest(BaseModel):
@@ -95,12 +143,7 @@ class SimulateRequest(BaseModel):
     fight_style: str = Field("Patchwerk", description="simc fight_style flag.")
     desired_targets: int = Field(1, ge=1, le=20)
     iterations: int = Field(5000, ge=100, le=50000)
-    target_error: float | None = Field(
-        None,
-        ge=0.0,
-        le=5.0,
-        description="If set, simc stops once DPS std-error falls below this %.",
-    )
+    target_error: float | None = Field(None, ge=0.0, le=5.0)
     threads: int | None = Field(None, ge=1, le=256)
     rotation: str = Field(
         "simc_default",
@@ -117,15 +160,76 @@ class SimulateRequest(BaseModel):
         description=(
             "If true, force optimal_raid=1 + bloodlust override and inject "
             "current-patch flask/food/augment-rune/potion defaults for any "
-            "consumable the profile doesn't already specify. Matches the "
-            "expectation that we sim a fully prepped character."
+            "consumable the profile doesn't already specify."
         ),
     )
 
 
+# ---------------------------------------------------------------------------
+# App lifespan — initialise the semaphore + the retention sweeper
+# ---------------------------------------------------------------------------
+
+
+from contextlib import asynccontextmanager
+
+
+@asynccontextmanager
+async def _lifespan(_app: FastAPI):
+    global _semaphore
+    _semaphore = asyncio.Semaphore(MAX_CONCURRENT)
+    sweeper = asyncio.create_task(_retention_sweeper(), name="retention_sweeper")
+    try:
+        yield
+    finally:
+        sweeper.cancel()
+        # Cancel any still-running jobs so the sidecar shuts down cleanly.
+        async with _jobs_lock:
+            tasks = [j.task for j in _jobs.values() if j.task and not j.task.done()]
+        for t in tasks:
+            t.cancel()
+
+
+app = FastAPI(title="simc-sidecar", lifespan=_lifespan)
+
+
+async def _retention_sweeper() -> None:
+    """Prune finished jobs older than ``JOB_RETENTION_S`` every 5 min."""
+    try:
+        while True:
+            await asyncio.sleep(300)
+            cutoff = time.time() - JOB_RETENTION_S
+            async with _jobs_lock:
+                to_drop = [
+                    jid
+                    for jid, j in _jobs.items()
+                    if j.finished_at is not None and j.finished_at < cutoff
+                ]
+                for jid in to_drop:
+                    _jobs.pop(jid, None)
+            if to_drop:
+                logger.info("retention sweep dropped %d job(s)", len(to_drop))
+    except asyncio.CancelledError:
+        pass
+
+
+# ---------------------------------------------------------------------------
+# Public endpoints
+# ---------------------------------------------------------------------------
+
+
 @app.get("/healthz")
 async def healthz() -> dict[str, Any]:
-    return {"ok": True, "simc_bin": SIMC_BIN, "exists": Path(SIMC_BIN).exists()}
+    async with _jobs_lock:
+        queued = sum(1 for j in _jobs.values() if j.status == "queued")
+        running = sum(1 for j in _jobs.values() if j.status == "running")
+    return {
+        "ok": True,
+        "simc_bin": SIMC_BIN,
+        "exists": Path(SIMC_BIN).exists(),
+        "queued": queued,
+        "running": running,
+        "max_concurrent": MAX_CONCURRENT,
+    }
 
 
 @app.get("/version")
@@ -154,6 +258,135 @@ async def version() -> dict[str, Any]:
     return {"banner": banner, "exit_code": proc.returncode}
 
 
+@app.post("/simulate", status_code=202)
+async def submit_simulation(req: SimulateRequest) -> dict[str, Any]:
+    """Queue a simulation. Returns 202 immediately with a job_id the
+    caller polls on ``GET /jobs/{job_id}``."""
+    if not Path(SIMC_BIN).exists():
+        raise HTTPException(503, f"simc binary not found at {SIMC_BIN}")
+
+    job_id = uuid.uuid4().hex
+    job = Job(id=job_id, request=req.model_dump())
+    async with _jobs_lock:
+        _jobs[job_id] = job
+
+    # The asyncio.Task replaces the per-request waiting model: the HTTP
+    # handler returns immediately while the task runs in the background.
+    job.task = asyncio.create_task(_execute_job(job_id, req), name=f"simc-job-{job_id}")
+    return {"job_id": job_id, "status": "queued"}
+
+
+@app.get("/jobs/{job_id}")
+async def get_job(job_id: str) -> dict[str, Any]:
+    async with _jobs_lock:
+        job = _jobs.get(job_id)
+    if not job:
+        raise HTTPException(404, f"job {job_id!r} not found (expired or unknown)")
+    return _job_to_payload(job)
+
+
+@app.get("/jobs")
+async def list_jobs() -> dict[str, Any]:
+    async with _jobs_lock:
+        items = sorted(_jobs.values(), key=lambda j: j.created_at, reverse=True)
+    return {"jobs": [_job_summary(j) for j in items]}
+
+
+@app.delete("/jobs/{job_id}")
+async def cancel_job(job_id: str) -> dict[str, str]:
+    async with _jobs_lock:
+        job = _jobs.get(job_id)
+        if not job:
+            raise HTTPException(404, f"job {job_id!r} not found")
+        if job.status in ("succeeded", "failed", "cancelled"):
+            return {"status": job.status}
+        job.status = "cancelled"
+        job.finished_at = time.time()
+        if job.task and not job.task.done():
+            job.task.cancel()
+    return {"status": "cancelled"}
+
+
+# ---------------------------------------------------------------------------
+# Background execution
+# ---------------------------------------------------------------------------
+
+
+async def _execute_job(job_id: str, req: SimulateRequest) -> None:
+    """Background task that acquires the concurrency semaphore, runs
+    simc, and updates the in-memory job entry. Exceptions are caught
+    and stored on the job so /jobs/{id} can report them — they never
+    propagate up to the asyncio loop."""
+    async with _semaphore:
+        async with _jobs_lock:
+            job = _jobs.get(job_id)
+            if not job or job.status == "cancelled":
+                return
+            job.status = "running"
+            job.started_at = time.time()
+        try:
+            result = await _run_simc(req)
+            async with _jobs_lock:
+                job = _jobs.get(job_id)
+                if not job or job.status == "cancelled":
+                    return
+                job.status = "succeeded"
+                job.result = result
+                job.log_tail = result.pop("log_tail", "")
+                job.finished_at = time.time()
+        except asyncio.CancelledError:
+            async with _jobs_lock:
+                job = _jobs.get(job_id)
+                if job and job.status not in ("succeeded", "failed"):
+                    job.status = "cancelled"
+                    job.finished_at = time.time()
+            raise
+        except HTTPException as exc:
+            async with _jobs_lock:
+                job = _jobs.get(job_id)
+                if job:
+                    job.status = "failed"
+                    job.error = exc.detail if isinstance(exc.detail, str) else str(exc.detail)
+                    job.finished_at = time.time()
+        except Exception as exc:  # noqa: BLE001
+            logger.exception("simc job %s failed", job_id)
+            async with _jobs_lock:
+                job = _jobs.get(job_id)
+                if job:
+                    job.status = "failed"
+                    job.error = f"{type(exc).__name__}: {exc}"[:1000]
+                    job.finished_at = time.time()
+
+
+def _job_summary(job: Job) -> dict[str, Any]:
+    return {
+        "job_id": job.id,
+        "status": job.status,
+        "created_at": job.created_at,
+        "started_at": job.started_at,
+        "finished_at": job.finished_at,
+        "fight_style": (job.request or {}).get("fight_style"),
+        "iterations": (job.request or {}).get("iterations"),
+        "rotation": (job.request or {}).get("rotation"),
+    }
+
+
+def _job_to_payload(job: Job) -> dict[str, Any]:
+    payload = _job_summary(job)
+    if job.result is not None:
+        payload["result"] = job.result
+    if job.error:
+        payload["error"] = job.error
+    if job.log_tail:
+        payload["log_tail"] = job.log_tail
+    return payload
+
+
+# ---------------------------------------------------------------------------
+# Core simc invocation (subprocess spawn + JSON parse)
+# ---------------------------------------------------------------------------
+
+
 def _strip_action_lines(profile: str) -> str:
     """Drop any ``actions[+]=`` line so the engine falls back to its
     built-in default APL (community default or Blizzard one-button,
@@ -170,7 +403,6 @@ def _strip_action_lines(profile: str) -> str:
 def _has_directive(profile: str, key: str) -> bool:
     """Return True if the profile already sets ``key=…`` (anywhere,
     ignoring lines commented out with ``#``)."""
-    needle = f"{key}="
     for line in profile.splitlines():
         stripped = line.strip()
         if not stripped or stripped.startswith("#"):
@@ -198,9 +430,9 @@ def _inject_consumable_defaults(profile: str) -> str:
 def _parse_result(data: dict, fallback_dps_mean: float = 0.0) -> dict[str, Any]:
     """Pull the bits we care about out of simc's JSON dump (--json2).
 
-    simc's JSON is verbose (hundreds of KiB per sim) — we keep only
-    the DPS summary and per-ability damage breakdown. The frontend
-    renders both directly.
+    simc's JSON is verbose (hundreds of KiB per sim) — we keep only the
+    DPS summary and per-ability damage breakdown. The frontend renders
+    both directly.
     """
     sim = data.get("sim") or {}
     players = sim.get("players") or []
@@ -209,8 +441,8 @@ def _parse_result(data: dict, fallback_dps_mean: float = 0.0) -> dict[str, Any]:
     player = players[0]
     collected = player.get("collected_data") or {}
 
-    def _stat(field: str, key: str = "mean") -> float:
-        node = collected.get(field) or {}
+    def _stat(field_: str, key: str = "mean") -> float:
+        node = collected.get(field_) or {}
         return float(node.get(key, 0.0) or 0.0)
 
     dps_mean = _stat("dps") or fallback_dps_mean
@@ -218,10 +450,6 @@ def _parse_result(data: dict, fallback_dps_mean: float = 0.0) -> dict[str, Any]:
 
     abilities: list[dict[str, Any]] = []
     for stats in player.get("stats") or []:
-        # simc emits a row per spell *per type* (damage, heal, …) plus
-        # rollup rows. We only want damage and we want the per-spell
-        # entries (skip the synthetic "total" / class roll-ups marked
-        # with type != damage).
         if (stats.get("type") or "").lower() != "damage":
             continue
         actual = stats.get("actual_amount") or {}
@@ -245,8 +473,6 @@ def _parse_result(data: dict, fallback_dps_mean: float = 0.0) -> dict[str, Any]:
     for a in abilities:
         a["pct"] = (a["dps"] / total_dps * 100.0) if total_dps else 0.0
 
-    # simc emits ``version`` as either a string (older builds) or a dict
-    # with ``git_revision`` (newer builds). Be defensive about both shapes.
     version_node = data.get("version")
     if isinstance(version_node, dict):
         build = version_node.get("git_revision")
@@ -276,11 +502,7 @@ def _parse_result(data: dict, fallback_dps_mean: float = 0.0) -> dict[str, Any]:
     }
 
 
-@app.post("/simulate")
-async def simulate(req: SimulateRequest) -> dict[str, Any]:
-    if not Path(SIMC_BIN).exists():
-        raise HTTPException(503, f"simc binary not found at {SIMC_BIN}")
-
+async def _run_simc(req: SimulateRequest) -> dict[str, Any]:
     profile_text = req.profile
     extra_args: list[str] = []
     if req.rotation == "blizzard":
@@ -374,8 +596,6 @@ async def simulate(req: SimulateRequest) -> dict[str, Any]:
         except ValueError as exc:
             raise HTTPException(500, f"could not parse simc JSON: {exc}")
 
-        # Keep a short tail of simc's stdout for diagnostics — full
-        # log is megabytes and not useful in the DB row.
         parsed["log_tail"] = out_text[-2000:]
         return parsed
 

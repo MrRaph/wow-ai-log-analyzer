@@ -120,6 +120,22 @@ async def ping_version() -> dict[str, Any]:
     return r.json()
 
 
+async def ping_healthz() -> dict[str, Any]:
+    """Return the sidecar's live queue + running counts (cheap call —
+    no subprocess spawn). Used by the frontend to display a "waiting in
+    queue" hint when several users hit ``/simulate`` at the same time."""
+    try:
+        async with _client() as client:
+            r = await client.get("/healthz", timeout=10)
+    except httpx.HTTPError as exc:
+        raise UpstreamError(
+            f"simc sidecar unreachable at {settings.simc_base_url}: {exc}"
+        ) from exc
+    if r.status_code >= 400:
+        raise UpstreamError(f"simc /healthz returned {r.status_code}: {r.text[:500]}")
+    return r.json()
+
+
 async def run_simulation(
     *,
     profile: str,
@@ -128,11 +144,21 @@ async def run_simulation(
     rotation: str,
     threads: int | None = None,
     target_error: float | None = None,
+    poll_interval_s: float = 2.0,
 ) -> dict[str, Any]:
-    """Hand a profile to the sidecar's /simulate endpoint and return
-    the parsed result. Raises ``UpstreamError`` if the sidecar is
-    unreachable / 5xx, ``ValidationAppError`` if simc itself rejected
-    the profile (4xx)."""
+    """Submit a simulation to the sidecar and poll for the result.
+
+    The sidecar exposes an async-job API:
+
+    1. ``POST /simulate`` → 202 with ``{"job_id": …, "status": "queued"}``
+    2. ``GET  /jobs/{id}`` → status + result once done
+
+    We block (asynchronously) on the polling loop until the job reaches
+    a terminal state. ``UpstreamError`` covers transport / 5xx,
+    ``ValidationAppError`` covers simc rejecting the profile, and a
+    timeout maps to ``UpstreamError`` after best-effort cancellation
+    so the sidecar can free its slot.
+    """
     if fight_profile_key not in FIGHT_PROFILES:
         raise ValidationAppError(f"unknown fight profile {fight_profile_key!r}")
     fp = FIGHT_PROFILES[fight_profile_key]
@@ -149,6 +175,7 @@ async def run_simulation(
     if target_error is not None:
         payload["target_error"] = target_error
 
+    # ---- 1) submit ---------------------------------------------------------
     try:
         async with _client() as client:
             r = await client.post("/simulate", json=payload)
@@ -158,7 +185,6 @@ async def run_simulation(
         ) from exc
 
     if 400 <= r.status_code < 500:
-        # 4xx → bad profile / unsupported flag — surface to the user.
         try:
             detail = r.json().get("detail")
         except Exception:  # noqa: BLE001
@@ -166,4 +192,60 @@ async def run_simulation(
         raise ValidationAppError(f"simc rejected the profile: {detail}")
     if r.status_code >= 500:
         raise UpstreamError(f"simc sidecar errored ({r.status_code}): {r.text[:500]}")
-    return r.json()
+
+    submission = r.json()
+    job_id = submission.get("job_id")
+    if not job_id:
+        raise UpstreamError("simc sidecar did not return a job_id")
+
+    # ---- 2) poll -----------------------------------------------------------
+    import asyncio
+    import time
+
+    deadline = time.monotonic() + settings.simc_request_timeout_s
+    while True:
+        if time.monotonic() > deadline:
+            # Be polite — tell the sidecar to free its slot, then surface.
+            try:
+                async with _client() as client:
+                    await client.delete(f"/jobs/{job_id}", timeout=10)
+            except httpx.HTTPError:
+                pass
+            raise UpstreamError(
+                f"simc job {job_id} exceeded backend timeout "
+                f"({settings.simc_request_timeout_s}s)"
+            )
+        await asyncio.sleep(poll_interval_s)
+
+        try:
+            async with _client() as client:
+                rr = await client.get(f"/jobs/{job_id}", timeout=15)
+        except httpx.HTTPError as exc:
+            # Transient: log and retry until deadline.
+            logger.warning("simc job %s poll failed: %s", job_id, exc)
+            continue
+
+        if rr.status_code == 404:
+            raise UpstreamError(
+                f"simc job {job_id} disappeared from the sidecar (retention?)"
+            )
+        if rr.status_code >= 500:
+            logger.warning("simc job %s poll returned %s", job_id, rr.status_code)
+            continue
+
+        body = rr.json()
+        status = body.get("status")
+        if status == "succeeded":
+            result = body.get("result") or {}
+            log_tail = body.get("log_tail")
+            if log_tail:
+                result["log_tail"] = log_tail
+            return result
+        if status == "failed":
+            err = body.get("error") or "simc failed"
+            # Mirror the synchronous-API mapping: simc rejecting the
+            # profile is a user-facing 4xx, anything else is 5xx.
+            raise ValidationAppError(f"simc failed: {err}")
+        if status == "cancelled":
+            raise UpstreamError(f"simc job {job_id} was cancelled by the sidecar")
+        # queued / running → loop

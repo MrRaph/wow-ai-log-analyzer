@@ -32,6 +32,7 @@ from app.models import (
     UserRole,
 )
 from app.schemas.simulation import (
+    PRECISION_ITERATIONS,
     PaginatedSimulations,
     SimulationCreate,
     SimulationListItem,
@@ -42,6 +43,23 @@ from app.services import simc_service
 logger = logging.getLogger(__name__)
 
 router = APIRouter()
+
+
+@router.get("/_sidecar-status")
+async def sidecar_status() -> dict:
+    """Live sidecar queue depth. The frontend polls this when a
+    simulation is queued so it can show a "waiting in queue" hint with
+    the user's approximate position."""
+    try:
+        info = await simc_service.ping_healthz()
+        return {
+            "reachable": True,
+            "queued": int(info.get("queued") or 0),
+            "running": int(info.get("running") or 0),
+            "max_concurrent": int(info.get("max_concurrent") or 1),
+        }
+    except Exception:  # noqa: BLE001
+        return {"reachable": False, "queued": 0, "running": 0, "max_concurrent": 1}
 
 
 @router.get("/_info")
@@ -70,7 +88,12 @@ async def simulation_info() -> dict:
             for key, meta in simc_service.FIGHT_PROFILES.items()
         ],
         "rotations": ["simc_default", "blizzard", "custom"],
-        "default_iterations": settings.simc_default_iterations,
+        "precisions": [
+            {"key": key, "iterations": value}
+            for key, value in PRECISION_ITERATIONS.items()
+        ],
+        "default_precision": "precise",
+        "default_iterations": PRECISION_ITERATIONS["precise"],
         "max_loadouts": settings.simc_max_loadouts,
         "retention_days": settings.simc_retention_days,
         "simc_build": version_info.get("banner", ""),
@@ -92,7 +115,7 @@ async def create_simulation(
             f"At most {settings.simc_max_loadouts} loadouts per simulation."
         )
 
-    iterations = payload.iterations or settings.simc_default_iterations
+    iterations = PRECISION_ITERATIONS[payload.precision]
 
     # Sanity-check the profile: must mention a class line so simc has
     # any chance of parsing it. /simc paste always has e.g.
@@ -106,13 +129,27 @@ async def create_simulation(
             "in-game /simc command produced."
         )
 
+    # Deduplicate rotations preserving order — defending against a
+    # frontend bug that double-sends "simc_default" or similar.
+    seen: set[str] = set()
+    rotations: list[str] = []
+    for r in payload.rotations:
+        if r in seen:
+            continue
+        seen.add(r)
+        rotations.append(r)
+    if not rotations:
+        raise ValidationAppError("At least one rotation must be selected.")
+
     parent = Simulation(
         requested_by_id=user.id,
         label=payload.label or "",
         simc_profile=payload.simc_profile,
         loadouts=[ld.model_dump() for ld in payload.loadouts],
         fight_profiles=list(payload.fight_profiles),
+        rotations=rotations,
         iterations=iterations,
+        precision=payload.precision,
         status=SimulationStatus.pending,
     )
     session.add(parent)
@@ -120,16 +157,17 @@ async def create_simulation(
 
     for li, loadout in enumerate(payload.loadouts):
         for fp in payload.fight_profiles:
-            session.add(
-                SimulationRun(
-                    simulation_id=parent.id,
-                    loadout_index=li,
-                    loadout_name=loadout.name or f"Loadout {li + 1}",
-                    rotation=loadout.rotation,
-                    fight_profile_key=fp,
-                    status=SimulationRunStatus.pending,
+            for rot in rotations:
+                session.add(
+                    SimulationRun(
+                        simulation_id=parent.id,
+                        loadout_index=li,
+                        loadout_name=loadout.name or f"Loadout {li + 1}",
+                        rotation=rot,
+                        fight_profile_key=fp,
+                        status=SimulationRunStatus.pending,
+                    )
                 )
-            )
 
     await session.commit()
     await session.refresh(parent)
@@ -163,7 +201,9 @@ async def list_my_simulations(
             label=r.label,
             status=r.status,
             iterations=r.iterations,
+            precision=r.precision,
             fight_profiles=r.fight_profiles or [],
+            rotations=r.rotations or ["simc_default"],
             loadout_count=len(r.loadouts or []),
             created_at=r.created_at,
             finished_at=r.finished_at,

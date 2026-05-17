@@ -130,8 +130,21 @@
       "council": "Raid — Council (3 Bosse)",
       "mythic_plus": "Mythic+ Pulls (DungeonSlice)"
     },
+    "rotationModesLabel": "Rotation-Modi vergleichen",
+    "rotationModesHint": "Mind. einen wählen. Jeder ausgewählte Modus wird gegen jedes Loadout × Fight-Profil simuliert, sodass z. B. ein Häkchen bei 'Blizzard One-Button' direkt einen Mit/Ohne-Vergleich liefert.",
+    "precisionLabel": "Präzision",
+    "precision": {
+      "fast": "Schnell",
+      "medium": "Mittel",
+      "precise": "Präzise"
+    },
+    "totalRuns": "{n} Simulationsläufe insgesamt",
+    "progressRuns": "{done} von {total} Läufen fertig",
+    "progressRunning": "{n} laufen",
+    "queueHint": "Sidecar ausgelastet: {running} laufen, {queued} davor in der Schlange. Start sobald ein Slot frei ist.",
+    "queueWaitingForWorker": "Warte auf einen freien Worker-Slot…",
     "loadoutsLabel": "Talentbäume",
-    "loadoutsHint": "Bis zu {max} Talentbäume vergleichen. Jede Kombination aus (Talentbaum × Fight-Profil) wird einzeln simuliert.",
+    "loadoutsHint": "Bis zu {max} Talentbäume vergleichen. Jede Kombination aus (Talentbaum × Fight × Rotation) wird einzeln simuliert.",
     "addLoadout": "Talentbaum hinzufügen",
     "removeLoadout": "Talentbaum entfernen",
     "loadoutName": "Name",

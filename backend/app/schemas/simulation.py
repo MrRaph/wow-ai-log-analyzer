@@ -11,6 +11,18 @@ from app.models.simulation import SimulationRunStatus, SimulationStatus
 
 Rotation = Literal["simc_default", "blizzard", "custom"]
 FightProfileKey = Literal["single_target", "council", "mythic_plus"]
+Precision = Literal["fast", "medium", "precise"]
+
+# Iteration count for each precision preset. The /info endpoint exposes
+# these so the frontend can show an indicative count next to the button.
+# Tuned so "fast" returns in ~10 s on a fast box, "medium" in ~25 s, and
+# "precise" in ~45-60 s for a single-target Patchwerk run. M+ DungeonSlice
+# scales roughly 3x because the fight is longer + multi-target work.
+PRECISION_ITERATIONS: dict[str, int] = {
+    "fast": 1000,
+    "medium": 2500,
+    "precise": 5000,
+}
 
 
 class LoadoutIn(BaseModel):
@@ -24,17 +36,29 @@ class LoadoutIn(BaseModel):
 
     name: str = Field(default="", max_length=120)
     talents: str = Field(default="", max_length=20000)
-    rotation: Rotation = "simc_default"
 
 
 class SimulationCreate(BaseModel):
-    """Payload for ``POST /simulations``."""
+    """Payload for ``POST /simulations``.
+
+    The cartesian product ``loadouts × fight_profiles × rotations``
+    becomes the per-row ``SimulationRun`` table. The frontend renders
+    the grid along whichever axes have > 1 entry, so a 1-loadout +
+    1-fight + 2-rotation request collapses to a simple two-row
+    "with / without Blizzard" comparison.
+    """
 
     label: str = Field(default="", max_length=255)
     simc_profile: str = Field(min_length=20, max_length=200_000)
     fight_profiles: list[FightProfileKey] = Field(min_length=1, max_length=3)
     loadouts: list[LoadoutIn] = Field(min_length=1, max_length=3)
-    iterations: int | None = Field(default=None, ge=500, le=50_000)
+    # 1-3 rotation modes to simulate. Defaults to community APL only.
+    # ``custom`` lets advanced users keep whatever ``actions=`` block
+    # they pasted in the profile.
+    rotations: list[Rotation] = Field(
+        default_factory=lambda: ["simc_default"], min_length=1, max_length=3
+    )
+    precision: Precision = "precise"
 
 
 class SimulationAbility(BaseModel):
@@ -82,7 +106,9 @@ class SimulationOut(BaseModel):
     simc_profile: str
     loadouts: list[LoadoutIn]
     fight_profiles: list[FightProfileKey]
+    rotations: list[Rotation]
     iterations: int
+    precision: Precision
     status: SimulationStatus
     error: str | None
     started_at: datetime | None
@@ -102,7 +128,9 @@ class SimulationListItem(BaseModel):
     label: str
     status: SimulationStatus
     iterations: int
+    precision: Precision
     fight_profiles: list[FightProfileKey]
+    rotations: list[Rotation]
     loadout_count: int
     created_at: datetime
     finished_at: datetime | None
