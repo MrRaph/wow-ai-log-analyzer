@@ -588,16 +588,47 @@ def _build_args_and_profile(
     return profile_text, extra_args
 
 
+CRASH_DUMP_DIR = Path(os.environ.get("SIMC_CRASH_DUMP_DIR", "/tmp/simc-crashes"))
+
+
+def _dump_crash(profile_text: str, args: list[str], out_text: str, err_text: str) -> str:
+    """Persist the input.simc + args + stdout/stderr of a crashed run.
+
+    Crashes that don't reproduce locally are usually item/thread-race
+    bugs in a specific simc build. Keeping the exact failing input on
+    disk lets us pull it later (via ``docker cp``) and bisect down to
+    the offending item without having to ask the user to reproduce.
+    """
+    try:
+        CRASH_DUMP_DIR.mkdir(parents=True, exist_ok=True)
+        slug = uuid.uuid4().hex[:12]
+        ts = time.strftime("%Y%m%d-%H%M%S")
+        base = CRASH_DUMP_DIR / f"crash-{ts}-{slug}"
+        base.with_suffix(".simc").write_text(profile_text, encoding="utf-8")
+        base.with_suffix(".args").write_text(" ".join(args), encoding="utf-8")
+        base.with_suffix(".log").write_text(
+            f"=== stdout ===\n{out_text}\n\n=== stderr ===\n{err_text}\n",
+            encoding="utf-8",
+        )
+        logger.warning("crash dump saved: %s.{simc,args,log}", base)
+        return str(base)
+    except Exception:  # noqa: BLE001
+        logger.exception("could not save crash dump")
+        return ""
+
+
 async def _run_simc_once(
     req: SimulateRequest,
     *,
     profile_text: str,
     extra_args: list[str],
-) -> tuple[int, str, str, dict | None]:
-    """Spawn simc once. Returns (exit_code, stdout, stderr, json_or_None).
+) -> tuple[int, str, str, dict | None, list[str]]:
+    """Spawn simc once. Returns (exit_code, stdout, stderr, json_or_None, args).
 
     Does NOT raise — the caller decides what to do based on the exit
-    code + stdout, so the retry helpers can introspect simc's output."""
+    code + stdout, so the retry helpers can introspect simc's output.
+    Returns the full args list so the dump-on-crash path can persist
+    the exact invocation that crashed."""
     with tempfile.TemporaryDirectory(prefix="simc-") as workdir:
         wd = Path(workdir)
         input_file = wd / "input.simc"
@@ -648,7 +679,7 @@ async def _run_simc_once(
             except json.JSONDecodeError as exc:
                 logger.warning("simc produced JSON we couldn't decode: %s", exc)
                 data = None
-        return proc.returncode or 0, out_text, err_text, data
+        return proc.returncode or 0, out_text, err_text, data, args
 
 
 async def _run_simc(req: SimulateRequest) -> dict[str, Any]:
@@ -678,9 +709,10 @@ async def _run_simc(req: SimulateRequest) -> dict[str, Any]:
         req.iterations,
         req.rotation,
     )
-    rc, out_text, err_text, data = await _run_simc_once(
+    rc, out_text, err_text, data, last_args = await _run_simc_once(
         req, profile_text=profile_text, extra_args=extra_args
     )
+    last_profile = profile_text
 
     # Retry #1: explicit "Dungeon Slice is disabled" gate.
     if (
@@ -692,18 +724,21 @@ async def _run_simc(req: SimulateRequest) -> dict[str, Any]:
         profile_text, extra_args = _build_args_and_profile(
             req, inject_dungeon_slice=True, rng_seed=None
         )
-        rc, out_text, err_text, data = await _run_simc_once(
+        rc, out_text, err_text, data, last_args = await _run_simc_once(
             req, profile_text=profile_text, extra_args=extra_args
         )
+        last_profile = profile_text
 
-    # Retry #2: segfault (-11 / 11) or simc's own SIGSEGV handler line.
-    # simc's signal handler dumps "sim_signal_handler: Segmentation fault!"
-    # and exits non-zero. Same seed = same crash, so re-roll.
+    # Retry #2: segfault. simc's signal handler dumps
+    # "sim_signal_handler: Segmentation fault!" and exits non-zero.
+    # Re-roll with a fixed seed so the crashed thread-init path isn't
+    # repeated. If the crash is item-deterministic this won't help —
+    # which is what _dump_crash exists for.
     seg_hint = "Segmentation fault" in (out_text + err_text)
     if (rc in (11, -11) or seg_hint) and data is None:
         new_seed = random.getrandbits(63)
         logger.warning(
-            "simc segfaulted (exit=%s) — retrying once with rng_seed=%s",
+            "simc segfaulted (exit=%s) — retrying once with seed=%s",
             rc,
             new_seed,
         )
@@ -713,17 +748,22 @@ async def _run_simc(req: SimulateRequest) -> dict[str, Any]:
                                   and "Dungeon Slice is disabled" in (out_text + err_text)),
             rng_seed=new_seed,
         )
-        rc, out_text, err_text, data = await _run_simc_once(
+        rc, out_text, err_text, data, last_args = await _run_simc_once(
             req, profile_text=profile_text, extra_args=extra_args
         )
+        last_profile = profile_text
 
     if rc != 0 and data is None:
+        dump = _dump_crash(last_profile, last_args, out_text, err_text)
+        suffix = f" (crash dump: {dump})" if dump else ""
         raise HTTPException(
             400,
-            f"simc exit {rc}: {(err_text or out_text)[-1500:]}",
+            f"simc exit {rc}: {(err_text or out_text)[-1500:]}{suffix}",
         )
     if data is None:
-        raise HTTPException(500, f"simc finished but produced no JSON: {out_text[-800:]}")
+        dump = _dump_crash(last_profile, last_args, out_text, err_text)
+        suffix = f" (crash dump: {dump})" if dump else ""
+        raise HTTPException(500, f"simc finished but produced no JSON{suffix}: {out_text[-800:]}")
 
     try:
         parsed = _parse_result(data)

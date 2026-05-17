@@ -205,6 +205,14 @@ services:
       # stack — e.g. on a shared dev box.
       SIMC_DEFAULT_THREADS: ${SIMC_DEFAULT_THREADS:-0}
       SIMC_TIMEOUT_S: ${SIMC_TIMEOUT_S:-1800}
+      # Failed simc runs save the exact input.simc + args + log to this
+      # directory so an admin can grab them via the named volume and
+      # bisect down to whatever item / item-thread interaction simc 1205
+      # tripped over. Bounded by simple disk eviction (manual rm — these
+      # are dev artefacts).
+      SIMC_CRASH_DUMP_DIR: /crashes
+    volumes:
+      - simc-crash-dumps:/crashes
     expose:
       - "8090"
     healthcheck:
@@ -222,3 +230,4 @@ volumes:
   postgres-data:
   redis-data:
   llama-cache:
+  simc-crash-dumps:
