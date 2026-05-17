@@ -39,6 +39,8 @@ import asyncio
 import json
 import logging
 import os
+import random
+import re
 import shutil
 import tempfile
 import time
@@ -425,6 +427,26 @@ def _has_directive(profile: str, key: str) -> bool:
     return False
 
 
+_SPEC_RE = re.compile(r"^(\s*spec\s*=\s*\S+\s*)$", re.MULTILINE)
+
+
+def _inject_dungeon_slice_flag(profile: str) -> str:
+    """Insert ``enable_dungeon_slice=1`` right after the ``spec=…`` line.
+
+    simc's DungeonSlice support is opt-in for some class modules
+    (Demon Hunter, possibly others). The flag must live in the
+    *player block* — putting it before the class line or as a CLI
+    arg trips an "Unknown option" warning and is ignored. We splice
+    it after ``spec=`` because every /simc paste has one and it's
+    always inside the player block.
+    """
+    new, n = _SPEC_RE.subn(r"\1\nenable_dungeon_slice=1", profile, count=1)
+    if n > 0:
+        return new
+    # No spec line — append at the end as a best-effort fallback.
+    return profile.rstrip() + "\nenable_dungeon_slice=1\n"
+
+
 def _inject_consumable_defaults(profile: str) -> str:
     """Append flask/food/augment/potion lines for any consumable the
     profile doesn't already define. Keeps the user's choice if they
@@ -526,44 +548,55 @@ def _parse_result(data: dict, fallback_dps_mean: float = 0.0) -> dict[str, Any]:
     }
 
 
-async def _run_simc(req: SimulateRequest) -> dict[str, Any]:
+def _build_args_and_profile(
+    req: SimulateRequest,
+    *,
+    inject_dungeon_slice: bool,
+    rng_seed: int | None,
+) -> tuple[str, list[str]]:
+    """Compute the final profile text + extra CLI args for one attempt.
+
+    Split out so the retry path can re-derive both with adjusted flags
+    (``inject_dungeon_slice`` for the DH-style retry, ``rng_seed`` for
+    the segfault-retry)."""
     profile_text = req.profile
     extra_args: list[str] = []
     if req.rotation == "blizzard":
-        # Strip user actions first so the engine can't ignore the flag,
-        # then turn on Blizzard's in-game single-button-assist system.
         profile_text = _strip_action_lines(profile_text)
         extra_args.append("use_blizzard_action_list=1")
     elif req.rotation == "simc_default":
-        # The community default APL kicks in automatically when the
-        # profile has no actions= lines. /simc paste from in-game
-        # never includes any, but a user-edited profile might — strip
-        # to make the mode predictable.
         profile_text = _strip_action_lines(profile_text)
     # custom → leave the profile alone
 
     fight_style_lc = req.fight_style.lower()
-
     if req.assume_raid_prep:
-        # Consumables are reasonable to assume for *any* serious sim
-        # (the user IS sim'ing a fully-prepped character) — but the
-        # global raid-buff and forced-bloodlust flags only make sense
-        # for actual raid encounters. DungeonSlice already models a
-        # 5-player group with one Bloodlust at pull start; layering
-        # optimal_raid + a permanent BL on top inflates M+ DPS.
         profile_text = _inject_consumable_defaults(profile_text)
         if fight_style_lc in _RAID_PREP_FIGHT_STYLES:
             extra_args.extend(RAID_PREP_GLOBAL_FLAGS)
 
-    # DungeonSlice (simc's canonical M+ profile) is gated per-spec because
-    # not every spec has a tuned M+ APL. ``enable_dungeon_slice=1`` is a
-    # *player option*, not a top-level sim option: passing it as a CLI
-    # arg trips simc's "Unknown option" warning and is ignored. It needs
-    # to live inside the profile body so simc applies it to the player
-    # being constructed.
-    if fight_style_lc == "dungeonslice":
-        profile_text = profile_text.rstrip() + "\nenable_dungeon_slice=1\n"
+    if inject_dungeon_slice and fight_style_lc == "dungeonslice":
+        profile_text = _inject_dungeon_slice_flag(profile_text)
 
+    if rng_seed is not None:
+        # ``deterministic`` pins simc's RNG to a known seed so the retry
+        # can't repeat the same segfault. Combined with ``rng=`` it
+        # gives us a clean re-roll without changing the player setup.
+        extra_args.append(f"deterministic=1")
+        extra_args.append(f"rng_seed={rng_seed}")
+
+    return profile_text, extra_args
+
+
+async def _run_simc_once(
+    req: SimulateRequest,
+    *,
+    profile_text: str,
+    extra_args: list[str],
+) -> tuple[int, str, str, dict | None]:
+    """Spawn simc once. Returns (exit_code, stdout, stderr, json_or_None).
+
+    Does NOT raise — the caller decides what to do based on the exit
+    code + stdout, so the retry helpers can introspect simc's output."""
     with tempfile.TemporaryDirectory(prefix="simc-") as workdir:
         wd = Path(workdir)
         input_file = wd / "input.simc"
@@ -586,13 +619,6 @@ async def _run_simc(req: SimulateRequest) -> dict[str, Any]:
             args.append(f"threads={threads}")
         args.extend(extra_args)
 
-        logger.info(
-            "simc spawn: fight=%s targets=%s iter=%s rotation=%s",
-            req.fight_style,
-            req.desired_targets,
-            req.iterations,
-            req.rotation,
-        )
         try:
             proc = await asyncio.create_subprocess_exec(
                 *args,
@@ -613,27 +639,98 @@ async def _run_simc(req: SimulateRequest) -> dict[str, Any]:
 
         out_text = (stdout or b"").decode("utf-8", "replace")
         err_text = (stderr or b"").decode("utf-8", "replace")
-        if proc.returncode != 0:
-            raise HTTPException(
-                400,
-                f"simc exit {proc.returncode}: {(err_text or out_text)[-1500:]}",
-            )
-        if not json_out.exists():
-            raise HTTPException(500, f"simc finished but produced no JSON: {out_text[-800:]}")
+        data: dict | None = None
+        if json_out.exists():
+            try:
+                with json_out.open("r", encoding="utf-8") as fh:
+                    data = json.load(fh)
+            except json.JSONDecodeError as exc:
+                logger.warning("simc produced JSON we couldn't decode: %s", exc)
+                data = None
+        return proc.returncode or 0, out_text, err_text, data
 
-        try:
-            with json_out.open("r", encoding="utf-8") as fh:
-                data = json.load(fh)
-        except json.JSONDecodeError as exc:
-            raise HTTPException(500, f"could not decode simc JSON: {exc}")
 
-        try:
-            parsed = _parse_result(data)
-        except ValueError as exc:
-            raise HTTPException(500, f"could not parse simc JSON: {exc}")
+async def _run_simc(req: SimulateRequest) -> dict[str, Any]:
+    """Run simc with up to two narrowly-scoped retries:
 
-        parsed["log_tail"] = out_text[-2000:]
-        return parsed
+    * **DungeonSlice gate**: a few specs (notably Demon Hunter) need
+      ``enable_dungeon_slice=1`` to be spliced into the player block.
+      We don't inject it up-front (it triggers an "Unknown option"
+      warning for the majority of specs that auto-enable DungeonSlice),
+      so on the first failure we look for simc's explicit
+      "Dungeon Slice is disabled" hint and retry with the flag.
+
+    * **Segfault**: simc 1205-01 has a sporadic crash bug for specific
+      seed/item combinations. The same profile re-rolled with a fresh
+      RNG seed usually goes through. Retry once with a random seed
+      before giving up.
+    """
+    fight_style_lc = req.fight_style.lower()
+
+    profile_text, extra_args = _build_args_and_profile(
+        req, inject_dungeon_slice=False, rng_seed=None
+    )
+    logger.info(
+        "simc spawn: fight=%s targets=%s iter=%s rotation=%s",
+        req.fight_style,
+        req.desired_targets,
+        req.iterations,
+        req.rotation,
+    )
+    rc, out_text, err_text, data = await _run_simc_once(
+        req, profile_text=profile_text, extra_args=extra_args
+    )
+
+    # Retry #1: explicit "Dungeon Slice is disabled" gate.
+    if (
+        data is None
+        and fight_style_lc == "dungeonslice"
+        and "Dungeon Slice is disabled" in (out_text + err_text)
+    ):
+        logger.info("simc reports DungeonSlice opt-in needed — retrying with flag")
+        profile_text, extra_args = _build_args_and_profile(
+            req, inject_dungeon_slice=True, rng_seed=None
+        )
+        rc, out_text, err_text, data = await _run_simc_once(
+            req, profile_text=profile_text, extra_args=extra_args
+        )
+
+    # Retry #2: segfault (-11 / 11) or simc's own SIGSEGV handler line.
+    # simc's signal handler dumps "sim_signal_handler: Segmentation fault!"
+    # and exits non-zero. Same seed = same crash, so re-roll.
+    seg_hint = "Segmentation fault" in (out_text + err_text)
+    if (rc in (11, -11) or seg_hint) and data is None:
+        new_seed = random.getrandbits(63)
+        logger.warning(
+            "simc segfaulted (exit=%s) — retrying once with rng_seed=%s",
+            rc,
+            new_seed,
+        )
+        profile_text, extra_args = _build_args_and_profile(
+            req,
+            inject_dungeon_slice=(fight_style_lc == "dungeonslice"
+                                  and "Dungeon Slice is disabled" in (out_text + err_text)),
+            rng_seed=new_seed,
+        )
+        rc, out_text, err_text, data = await _run_simc_once(
+            req, profile_text=profile_text, extra_args=extra_args
+        )
+
+    if rc != 0 and data is None:
+        raise HTTPException(
+            400,
+            f"simc exit {rc}: {(err_text or out_text)[-1500:]}",
+        )
+    if data is None:
+        raise HTTPException(500, f"simc finished but produced no JSON: {out_text[-800:]}")
+
+    try:
+        parsed = _parse_result(data)
+    except ValueError as exc:
+        raise HTTPException(500, f"could not parse simc JSON: {exc}")
+
+    parsed["log_tail"] = out_text[-2000:]
+    return parsed
 
 
 if __name__ == "__main__":
