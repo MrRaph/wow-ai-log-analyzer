@@ -935,11 +935,12 @@ async def _run_simc(req: SimulateRequest) -> dict[str, Any]:
 
     if rc != 0 and data is None:
         dump = _dump_crash(last_profile, last_args, out_text, err_text)
+        full = out_text + err_text
         # Reproducible segfaults after a seed-re-roll retry are simc
         # internal bugs (commonly a class-module bug for a specific
         # talent/item combination). Word the error so the user
         # doesn't think it's a UI/input problem.
-        seg_hint = "Segmentation fault" in (out_text + err_text)
+        seg_hint = "Segmentation fault" in full
         if seg_hint:
             detail = (
                 "simc crashed internally on this profile (segfault). "
@@ -952,6 +953,33 @@ async def _run_simc(req: SimulateRequest) -> dict[str, Any]:
             detail = (err_text or out_text)[-1500:]
         suffix = f" (crash dump: {dump})" if dump else ""
         raise HTTPException(400, f"simc exit {rc}: {detail}{suffix}")
+
+    # Even a successful simc run can carry "Severe" warnings that mean
+    # the resulting numbers are garbage — e.g. an Invalid Hero Talent
+    # tree size, which we'd otherwise hand back to the user as a
+    # plausible-but-wrong DPS. Detect and surface as a user-facing
+    # error so the UI can prompt them to re-save the loadout in-game.
+    stale_hint = (
+        "Invalid Hero Talent tree" in (out_text + err_text)
+        or "Found 12 talents, expected 13" in (out_text + err_text)
+    )
+    if stale_hint and data is not None:
+        dump = _dump_crash(last_profile, last_args, out_text, err_text)
+        suffix = f" (crash dump: {dump})" if dump else ""
+        raise HTTPException(
+            400,
+            (
+                "Stale talent loadout: simc reported 'Invalid Hero Talent "
+                "tree' — this saved loadout was serialised before Blizzard "
+                "extended the hero talent tree. The active talents= line "
+                "in your /simc export is always re-serialised fresh and "
+                "should work; saved loadouts need to be re-saved in-game "
+                "(open each in the in-game talent picker, toggle one "
+                "talent, save again with the same name). Then re-export "
+                "your /simc string."
+            )
+            + suffix,
+        )
     if data is None:
         dump = _dump_crash(last_profile, last_args, out_text, err_text)
         suffix = f" (crash dump: {dump})" if dump else ""
