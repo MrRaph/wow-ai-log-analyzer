@@ -64,6 +64,22 @@ else
 fi
 log "simc branch=$TRACKING_BRANCH HEAD=$(git rev-parse --short HEAD)"
 
+# When pinning to an upstream commit, raidbots-style stability requires
+# we compile against the *bundled* generated DBC data tables that ship
+# with that commit. Our normal pipeline regenerates them from current
+# WoW CDN data, which is newer than what the pinned simc source knows
+# how to consume — that mismatch deterministically segfaults during
+# JSON serialisation for at least Death Knight Unholy. Detect the pin
+# and skip steps 2-4 entirely; ``git reset --hard`` already restored
+# the commit's bundled headers.
+if [ -n "${SIMC_PIN_COMMIT:-}" ]; then
+    log "== Steps 2-4 SKIPPED: SIMC_PIN_COMMIT set, using commit's bundled data =="
+    INPUT_BASE=""   # unused below in the pin path
+    LIVE_BUILD=""
+fi
+
+if [ -z "${SIMC_PIN_COMMIT:-}" ]; then
+
 log "== Step 2/6: pull live DBC data from WoW CDN =="
 # casc_extract downloads a few hundred MB on first run; subsequent
 # runs are incremental thanks to the on-disk cache directory.
@@ -113,6 +129,8 @@ if [ -f "$SOURCE_DIR/dbc_extract3/cache/live/DBCache.bin" ]; then
 else
     ./generate.sh "$LIVE_BUILD" "$INPUT_BASE" 2>&1 | tail -60
 fi
+
+fi  # end of "not pinned" data-regen branch
 
 log "== Step 5/6: rebuild simc binary =="
 cd "$SOURCE_DIR"

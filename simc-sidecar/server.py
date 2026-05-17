@@ -803,10 +803,19 @@ async def _run_simc_once(
             str(input_file),
             f"iterations={req.iterations}",
             f"fight_style={req.fight_style}",
-            f"desired_targets={req.desired_targets}",
             "html=",
             f"json2={json_out}",
         ]
+        # DungeonSlice has its own dynamic target-count progression
+        # (boss + add waves of varying size). Forcing
+        # ``desired_targets=1`` interferes with that and triggers a
+        # deterministic segfault during the JSON2 serializer phase on
+        # at least 6fbd8ca634 + Death Knight Unholy. Raidbots
+        # similarly omits the flag for DungeonSlice runs. Pass it
+        # only for fight styles that genuinely need a fixed target
+        # count (Patchwerk, Helter Skelter, etc.).
+        if req.fight_style.lower() != "dungeonslice":
+            args.append(f"desired_targets={req.desired_targets}")
         if req.target_error is not None:
             args.append(f"target_error={req.target_error}")
         threads = req.threads if req.threads is not None else DEFAULT_THREADS

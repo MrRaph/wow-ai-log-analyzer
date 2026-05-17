@@ -199,6 +199,17 @@ services:
       context: ./simc-sidecar
       dockerfile: Dockerfile
     restart: unless-stopped
+    # ``init: true`` adds Docker's ``tini`` shim as PID 1. Without it
+    # our uvicorn process runs as PID 1, which gives every simc child
+    # we spawn weird process-group/signal semantics (init never has a
+    # parent, doesn't reap orphans the way userland expects). For
+    # simc's threading + signal handlers that translates into a
+    # *deterministic* SIGSEGV during the json2 serialiser phase
+    # whenever we spawn it via subprocess — bisected exactly to this.
+    # The bare shell variant from ``docker exec`` is a sibling of
+    # PID 1, so it didn't reproduce there even though the args were
+    # identical.
+    init: true
     environment:
       # Cap on simc's thread pool per request. simc's midnight HEAD has a
       # race condition in the JSON serializer that hits Death Knight
