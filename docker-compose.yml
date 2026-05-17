@@ -229,6 +229,12 @@ services:
       - simc-build-cache:/opt/simc-source/casc_extract/cache
       - simc-wow-extract:/opt/simc-source/casc_extract/wow
       - simc-build-artifacts:/opt/simc-source/build
+      # Active simc binary + profiles. Persists across container
+      # recreates, so a self-built simc isn't wiped every time we
+      # restart the sidecar. The entrypoint compares the volume's
+      # binary against the image-bundled reference copy and uses
+      # whichever carries the newer hotfix.
+      - simc-active-bin:/app/SimulationCraft
     expose:
       - "8090"
     healthcheck:
@@ -250,3 +256,4 @@ volumes:
   simc-build-cache:
   simc-wow-extract:
   simc-build-artifacts:
+  simc-active-bin:

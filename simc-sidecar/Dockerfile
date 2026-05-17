@@ -56,11 +56,19 @@ ARG SIMC_SOURCE_BRANCH=midnight
 RUN git clone --depth 1 --branch ${SIMC_SOURCE_BRANCH} \
         https://github.com/simulationcraft/simc.git /opt/simc-source
 
+# Reference copy of the image-bundled simc binary + profiles. Survives
+# at the image-layer level even when ``/app/SimulationCraft`` is later
+# mounted as a volume. The entrypoint compares this against the
+# volume contents at every container start so admins always run the
+# newer of (volume-cached self-build) vs (image-bundled upstream).
+RUN cp -a /app/SimulationCraft /opt/simc-bundled
+
 WORKDIR /sidecar
-COPY server.py rebuild-simc.sh /sidecar/
-RUN chmod +x /sidecar/rebuild-simc.sh
+COPY server.py rebuild-simc.sh entrypoint.sh /sidecar/
+RUN chmod +x /sidecar/rebuild-simc.sh /sidecar/entrypoint.sh
 
 # Override the upstream entrypoint (which exec's simc directly).
-# The supervisor decides when and how to spawn it.
+# Our entrypoint promotes the newest simc into ``/app/SimulationCraft``
+# and then exec's the Python supervisor.
 ENTRYPOINT []
-CMD ["python3", "-u", "/sidecar/server.py"]
+CMD ["/sidecar/entrypoint.sh"]
