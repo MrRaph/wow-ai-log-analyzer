@@ -6,6 +6,7 @@
   },
   "nav": {
     "analyze": "Analyse",
+    "simulate": "Simulation",
     "topLogs": "Top-Logs",
     "admin": "Admin",
     "profile": "Profil",
@@ -113,6 +114,75 @@
     "previousPage": "Zurück",
     "nextPage": "Weiter",
     "pageOf": "Seite {page} von {total}"
+  },
+  "simulate": {
+    "title": "Simulation",
+    "subtitle": "Lass SimulationCraft für deinen Charakter laufen, um erwartete DPS und einen Aufschluss pro Fähigkeit zu sehen. Tippe ingame /simc, füge den Text hier ein, wähle Fight-Profile und Talentbäume aus und vergleiche.",
+    "sidecarReady": "SimC-Sidecar bereit.",
+    "sidecarUnreachable": "SimC-Sidecar nicht erreichbar — Admin muss den simc-Service starten.",
+    "labelInputLabel": "Bezeichnung",
+    "labelInputPlaceholder": "z. B. Hero-Raid-Vorbereitung",
+    "profileLabel": "/simc Profil",
+    "profileHint": "Im Spiel /simc tippen und den kompletten Block einfügen. Buffs, Flask, Food und Pot werden automatisch ergänzt.",
+    "fightProfilesLabel": "Fight-Profile",
+    "fightProfile": {
+      "single_target": "Raid — Single Target",
+      "council": "Raid — Council (3 Bosse)",
+      "mythic_plus": "Mythic+ Pulls (DungeonSlice)"
+    },
+    "loadoutsLabel": "Talentbäume",
+    "loadoutsHint": "Bis zu {max} Talentbäume vergleichen. Jede Kombination aus (Talentbaum × Fight-Profil) wird einzeln simuliert.",
+    "addLoadout": "Talentbaum hinzufügen",
+    "removeLoadout": "Talentbaum entfernen",
+    "loadoutName": "Name",
+    "loadoutNamePlaceholder": "Talentbaum {n}",
+    "rotationLabel": "Rotation",
+    "rotation": {
+      "simc_default": "SimC-Standard (Community-APL)",
+      "blizzard": "Blizzard One-Button-Hilfe",
+      "custom": "Eigene Rotation (actions= im Profil)"
+    },
+    "rotationHint": {
+      "simc_default": "Nutzt die von der Community gepflegte, nahezu optimale Rotation für diese Spec.",
+      "blizzard": "Simuliert die Blizzard One-Button-Hilfe via use_blizzard_action_list=1.",
+      "custom": "Verwendet den actions=-Block aus dem eingefügten Profil. Nur wählen, wenn du eine eigene APL geschrieben hast."
+    },
+    "talentsLabel": "Talente (optional)",
+    "talentsHint": "talents= / class_talents= / spec_talents= einfügen, um die Talente des Profils zu überschreiben. Leer lassen heißt: Talente aus dem Profil benutzen.",
+    "iterationsLabel": "Iterationen",
+    "iterationsHint": "Standard {def} (~2% Fehler). Mehr = präziser, aber langsamer.",
+    "runSimulation": "Simulation starten",
+    "starting": "Starte…",
+    "working": "Läuft…",
+    "history": "Deine Simulationen",
+    "historyEmpty": "Noch keine Simulationen.",
+    "openResult": "Öffnen",
+    "delete": "Löschen",
+    "confirmDelete": "Diese Simulation löschen?",
+    "untitled": "Unbenannte Simulation",
+    "loadoutCol": "Talentbaum",
+    "abilityCol": "Fähigkeit",
+    "executesCol": "Casts",
+    "runFailed": "Lauf fehlgeschlagen",
+    "iterationsWord": "Iterationen",
+    "status": {
+      "pending": "In Warteschlange",
+      "running": "Läuft",
+      "succeeded": "Fertig",
+      "failed": "Fehlgeschlagen"
+    }
+  },
+  "adminSimc": {
+    "title": "SimulationCraft-Sidecar",
+    "hint": "Lädt das aktuelle simulationcraftorg/simc-Image (täglich neu mit aktuellem Binary + DBC-Daten) und legt den simc-Container neu an. Benötigt ADMIN_DOCKER_CONTROL=true.",
+    "ready": "Bereit",
+    "unreachable": "Nicht erreichbar",
+    "baseUrl": "Base-URL",
+    "build": "SimC-Build",
+    "containerImage": "Image",
+    "containerStatus": "Container",
+    "updateNow": "Aktuellstes Image ziehen + neu anlegen",
+    "updating": "Aktualisiere…"
   },
   "topLogs": {
     "title": "Top-Logs",

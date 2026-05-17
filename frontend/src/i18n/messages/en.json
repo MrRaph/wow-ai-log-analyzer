@@ -6,6 +6,7 @@
   },
   "nav": {
     "analyze": "Analyze",
+    "simulate": "Simulate",
     "topLogs": "Top logs",
     "admin": "Admin",
     "profile": "Profile",
@@ -113,6 +114,75 @@
     "previousPage": "Previous",
     "nextPage": "Next",
     "pageOf": "Page {page} of {total}"
+  },
+  "simulate": {
+    "title": "Simulate",
+    "subtitle": "Run SimulationCraft against a character to see expected DPS and per-ability damage breakdown. Paste your /simc string from in-game, pick fight profiles and talent loadouts, then compare.",
+    "sidecarReady": "SimC sidecar ready.",
+    "sidecarUnreachable": "SimC sidecar unreachable — ask an admin to start the simc service.",
+    "labelInputLabel": "Label",
+    "labelInputPlaceholder": "e.g. Heroic raid prep",
+    "profileLabel": "/simc profile",
+    "profileHint": "Type /simc in-game, copy the whole block. Consumables and raid buffs are added automatically.",
+    "fightProfilesLabel": "Fight profiles",
+    "fightProfile": {
+      "single_target": "Raid — Single Target",
+      "council": "Raid — Council (3 bosses)",
+      "mythic_plus": "Mythic+ pulls (DungeonSlice)"
+    },
+    "loadoutsLabel": "Talent loadouts",
+    "loadoutsHint": "Compare up to {max} talent builds in one run. Each combination of (loadout × fight profile) becomes a separate sim.",
+    "addLoadout": "Add loadout",
+    "removeLoadout": "Remove loadout",
+    "loadoutName": "Name",
+    "loadoutNamePlaceholder": "Loadout {n}",
+    "rotationLabel": "Rotation",
+    "rotation": {
+      "simc_default": "SimC default (community APL)",
+      "blizzard": "Blizzard One-Button assist",
+      "custom": "Custom (use actions= in profile)"
+    },
+    "rotationHint": {
+      "simc_default": "Uses SimC's community-maintained near-optimal rotation for this spec.",
+      "blizzard": "Simulates Blizzard's in-game single-button assist system via use_blizzard_action_list=1.",
+      "custom": "Runs whatever actions= block is in the pasted profile. Pick this only if you wrote a custom APL."
+    },
+    "talentsLabel": "Talents (optional)",
+    "talentsHint": "Paste talents= / class_talents= / spec_talents= lines to override what's in the profile. Leave empty to use the profile's talents.",
+    "iterationsLabel": "Iterations",
+    "iterationsHint": "Default {def} (~2% error). Higher = more precise but slower.",
+    "runSimulation": "Run simulation",
+    "starting": "Starting…",
+    "working": "Running…",
+    "history": "Your simulations",
+    "historyEmpty": "No simulations yet.",
+    "openResult": "Open",
+    "delete": "Delete",
+    "confirmDelete": "Delete this simulation?",
+    "untitled": "Untitled simulation",
+    "loadoutCol": "Loadout",
+    "abilityCol": "Ability",
+    "executesCol": "Casts",
+    "runFailed": "Run failed",
+    "iterationsWord": "iterations",
+    "status": {
+      "pending": "Queued",
+      "running": "Running",
+      "succeeded": "Done",
+      "failed": "Failed"
+    }
+  },
+  "adminSimc": {
+    "title": "SimulationCraft sidecar",
+    "hint": "Pulls the latest simulationcraftorg/simc image (rebuilt daily with current binary + DBC data) and recreates the simc container. Requires ADMIN_DOCKER_CONTROL=true.",
+    "ready": "Ready",
+    "unreachable": "Unreachable",
+    "baseUrl": "Base URL",
+    "build": "SimC build",
+    "containerImage": "Image",
+    "containerStatus": "Container",
+    "updateNow": "Pull latest + recreate",
+    "updating": "Updating…"
   },
   "topLogs": {
     "title": "Top logs",

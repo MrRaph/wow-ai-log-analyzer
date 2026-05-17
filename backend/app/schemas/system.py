@@ -68,3 +68,15 @@ class LocalAiModelFile(BaseModel):
     filename: str
     size_bytes: int
     is_loaded: bool
+
+
+# --- SimC sidecar -----------------------------------------------------------
+
+
+class SimcStatusOut(BaseModel):
+    """Reachability + reported version of the simc sidecar."""
+
+    reachable: bool
+    build_banner: str = ""
+    base_url: str
+    container: ContainerOut | None = None

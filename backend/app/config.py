@@ -108,6 +108,30 @@ class Settings(BaseSettings):
     # models that don't recognise it.
     local_ai_enable_thinking: bool = True
 
+    # --- SimC sidecar ---
+    # Optional companion service that wraps the simulationcraftorg/simc
+    # binary in a thin FastAPI server (compose profile: ``simc``). The
+    # backend posts simulation requests to ``{base}/simulate`` and reads
+    # ``{base}/version`` for the admin "current build" display.
+    simc_base_url: str = "http://simc:8090"
+    # Per-simulation timeout the backend gives the sidecar's HTTP call.
+    # Slightly higher than the sidecar's own ``SIMC_TIMEOUT_S`` so the
+    # subprocess errors out first and we get a proper 4xx/5xx body rather
+    # than a torn connection. Bumped well above ST/Council runs to cover
+    # DungeonSlice on slower hardware.
+    simc_request_timeout_s: int = 2000
+    # Default iterations per sim run when the request doesn't override.
+    # 5000 gives ~2% error on most specs; bump to 10000 for tighter
+    # talent-tree comparisons.
+    simc_default_iterations: int = 5000
+    # Auto-cleanup window. Simulation rows older than this many days are
+    # deleted by the daily cron job (alongside their per-run children
+    # via FK cascade).
+    simc_retention_days: int = 30
+    # Hard cap on talent loadouts per request. Each loadout multiplies
+    # the total sim time linearly, so we keep this small by default.
+    simc_max_loadouts: int = 3
+
     # --- SMTP ---
     smtp_host: str = "smtp.local"
     smtp_port: int = 25

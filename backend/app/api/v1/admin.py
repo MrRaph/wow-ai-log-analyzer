@@ -16,9 +16,10 @@ from app.schemas.system import (
     LocalAiConfigPatch,
     LocalAiModelFile,
     LocalAiStatusOut,
+    SimcStatusOut,
     SystemStatusOut,
 )
-from app.services import docker_control, local_ai_supervisor_service as supervisor
+from app.services import docker_control, local_ai_supervisor_service as supervisor, simc_service
 from app.core.errors import UpstreamError
 from app.schemas.user import (
     AdminSettingsOut,
@@ -325,3 +326,69 @@ async def list_local_ai_models(_: AdminUser) -> list[LocalAiModelFile]:
 @router.delete("/local-ai/models/{filename}", status_code=status.HTTP_204_NO_CONTENT)
 async def delete_local_ai_model(filename: str, _: AdminUser) -> None:
     await supervisor.delete_model(filename)
+
+
+# --- SimC sidecar -----------------------------------------------------------
+#
+# Two endpoints: status (reachability + reported version + container row)
+# and a one-shot "pull latest + recreate" for tracking the upstream
+# simulationcraftorg/simc image. The upstream image is rebuilt daily
+# with the current binary and DBC data, so a single button click is
+# all the maintenance this needs in practice.
+
+
+@router.get("/simc/status", response_model=SimcStatusOut)
+async def read_simc_status(_: AdminUser) -> SimcStatusOut:
+    banner = ""
+    reachable = False
+    try:
+        info = await simc_service.ping_version()
+        banner = info.get("banner") or ""
+        reachable = True
+    except UpstreamError:
+        reachable = False
+
+    container_out: ContainerOut | None = None
+    if settings.admin_docker_control:
+        try:
+            row = await docker_control.list_stack_containers()
+            simc_row = next((c for c in row if c.service == "simc"), None)
+            if simc_row is not None:
+                container_out = _to_container_out(simc_row)
+        except UpstreamError:
+            container_out = None
+
+    return SimcStatusOut(
+        reachable=reachable,
+        build_banner=banner,
+        base_url=settings.simc_base_url,
+        container=container_out,
+    )
+
+
+@router.post("/simc/update", response_model=SimcStatusOut)
+async def update_simc_sidecar(_: AdminUser) -> SimcStatusOut:
+    """Pull the latest simc sidecar image and recreate the container.
+
+    Requires ADMIN_DOCKER_CONTROL + the docker socket mount on the
+    backend container. The recreate step preserves compose labels and
+    network attachment so the worker keeps reaching it as ``simc:8090``.
+    """
+    info = await docker_control.pull_and_recreate("simc")
+    container_out = _to_container_out(info)
+    # Probe the version banner once more so the response reflects the
+    # *new* build the admin just rolled forward to.
+    banner = ""
+    reachable = False
+    try:
+        v = await simc_service.ping_version()
+        banner = v.get("banner") or ""
+        reachable = True
+    except UpstreamError:
+        reachable = False
+    return SimcStatusOut(
+        reachable=reachable,
+        build_banner=banner,
+        base_url=settings.simc_base_url,
+        container=container_out,
+    )
