@@ -8,6 +8,7 @@ import { use, useEffect, useState } from "react";
 import { AuthGuard } from "@/components/AuthGuard";
 import { Button, Card, Input, Label, Select } from "@/components/ui";
 import { LocalAiCard } from "@/components/admin/LocalAiCard";
+import { SimcCard } from "@/components/admin/SimcCard";
 import { SystemCard } from "@/components/admin/SystemCard";
 import { TopLogsToolsCard } from "@/components/admin/TopLogsToolsCard";
 import { WowDataCard } from "@/components/admin/WowDataCard";
@@ -285,6 +286,7 @@ function AdminView({ locale, currentUserId }: { locale: Locale; currentUserId: s
       <WowDataCard locale={locale} />
       <TopLogsToolsCard locale={locale} />
       <LocalAiCard />
+      <SimcCard />
       <SystemCard />
 
       <Card className="!p-0 overflow-hidden">

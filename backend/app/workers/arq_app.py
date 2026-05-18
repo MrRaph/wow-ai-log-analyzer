@@ -26,6 +26,7 @@ from app.models import (
 from app.workers.tasks.analysis import run_analysis_task
 from app.workers.tasks.report_import import import_report_task
 from app.workers.tasks.seed_encounter import seed_encounter_task
+from app.workers.tasks.simulation import cleanup_old_simulations, run_simulation_task
 from app.workers.tasks.top_logs import refresh_all_top_logs
 from app.workers.tasks.wow_data import refresh_wow_data
 
@@ -161,10 +162,24 @@ class WorkerSettings:
         refresh_all_top_logs,
         refresh_wow_data,
         import_report_task,
-        run_analysis_task,
+        # 30 min — cloud Anthropic/OpenAI typically return in 1-3 min, but
+        # BYOK users with a self-hosted Ollama / llama.cpp on consumer
+        # hardware (no GPU or partial offload) can legitimately take
+        # 15-25 min for a single analysis. The 10 min default would cut
+        # those runs off mid-generation. The HTTP client in
+        # ``OpenAiCompatibleProvider`` is bumped to the same ceiling so
+        # both layers cap simultaneously instead of one fighting the
+        # other.
+        func(run_analysis_task, timeout=30 * 60),
         # 35 min — 39 specs × ~17 s WCL latency easily blows past the
         # 10 min default for fresh-cache seeds.
         func(seed_encounter_task, timeout=35 * 60),
+        # 35 min — worst case is 3 loadouts × 3 fight profiles × 5000
+        # iter where DungeonSlice can sit at ~3-5 min per run on a
+        # mid-range box. The sidecar enforces its own per-call limit
+        # (1800 s) so even a runaway profile can't pin a worker for
+        # 35 min total — this ceiling is just the wall-clock envelope.
+        func(run_simulation_task, timeout=35 * 60),
     ]
     cron_jobs = [
         cron(refresh_all_top_logs, name="refresh_all_top_logs", **_cron_kwargs),
@@ -172,6 +187,14 @@ class WorkerSettings:
         # of weeks otherwise, so checking once a week (Tuesday 03:00 UTC, well
         # before the EU reset top-logs job) is plenty.
         cron(refresh_wow_data, name="refresh_wow_data", weekday=2, hour=3, minute=0),
+        # Daily 04:30 UTC simulation retention sweep. Runs after the
+        # top-logs job so we never compete with it for DB locks.
+        cron(
+            cleanup_old_simulations,
+            name="cleanup_old_simulations",
+            hour=4,
+            minute=30,
+        ),
     ]
     on_startup = _cleanup_zombies
     keep_result = 86400

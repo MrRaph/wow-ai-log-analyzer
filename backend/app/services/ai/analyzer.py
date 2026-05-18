@@ -20,6 +20,7 @@ from app.models import (
     ReportPlayer,
     ReportPlayerCast,
     TopLog,
+    WowLocalization,
 )
 from app.services.ai.anthropic_provider import AnthropicProvider
 from app.services.ai.base import AiProvider, AiResponse
@@ -27,9 +28,11 @@ from app.services.ai.openai_provider import OpenAiCompatibleProvider
 from app.services.ai.prompts import build_user_prompt, system_prompt_for
 from app.services.wcl.client import WclClient
 from app.services.wcl.parser import (
+    aggregate_mana_recovery,
     parse_aura_table,
     parse_casts_table,
     parse_damage_taken_table,
+    parse_player_resource_events_page,
     parse_report_rankings_for_player,
 )
 from app.services.wcl.queries import (
@@ -37,6 +40,7 @@ from app.services.wcl.queries import (
     REPORT_CASTS,
     REPORT_DAMAGE_TAKEN_FOR_PLAYER,
     REPORT_DEBUFFS_BY_PLAYER,
+    REPORT_PLAYER_RESOURCE_EVENTS,
     REPORT_RANKINGS,
 )
 from app.services.wcl_oauth_service import build_user_wcl_client
@@ -220,6 +224,18 @@ async def _fetch_top_log_references(
         .limit(limit)
     )
     rows = (await session.execute(stmt)).scalars().all()
+    # Drop rows whose detail blob was written by an older code shape —
+    # they'd feed the AI a payload missing fields (e.g. boss_casts on
+    # pre-v0.3.0 detail). When all rows are stale this returns ``[]``,
+    # which makes the caller fall through to ``_ensure_references`` →
+    # incremental refresh → fresh detail with the current version stamp.
+    from app.services.top_logs_service import TOP_LOG_DETAIL_VERSION as _DV
+
+    rows = [
+        r
+        for r in rows
+        if int((r.detail_payload or {}).get("_v") or 0) >= _DV
+    ]
     out: list[dict[str, Any]] = []
     for r in rows:
         detail = r.detail_payload or {}
@@ -246,6 +262,10 @@ async def _fetch_top_log_references(
                     "buffs": detail.get("buffs") or [],
                     "debuffs": detail.get("debuffs") or [],
                     "damage_taken": detail.get("damage_taken") or [],
+                    # Boss-cast cycle timeline of the reference kill, same
+                    # shape as the user fight's ``fight.boss_casts`` so the
+                    # AI can compare cycle alignment directly.
+                    "boss_casts": detail.get("boss_casts") or [],
                 },
             }
         )
@@ -274,7 +294,14 @@ async def _enrich_player_with_aura_and_damage_taken(
     # means "we've already asked WCL". Avoids re-fetching for fights where WCL
     # genuinely has no rankings (very fresh boss / non-public log).
     has_parse_metrics = "parse_metrics" in extras
-    if has_auras and has_casts and has_parse_metrics:
+    # Only fetched for healers — DPS / tanks don't run on a mana-pressure
+    # budget worth analysing. We mark the key explicitly (even with zero
+    # recovery events) so subsequent analyses of the same player don't
+    # re-query WCL.
+    needs_mana_recovery = (
+        player.role == "healer" and "mana_recovery" not in extras
+    )
+    if has_auras and has_casts and has_parse_metrics and not needs_mana_recovery:
         return
 
     user_client: WclClient | None = None
@@ -366,6 +393,43 @@ async def _enrich_player_with_aura_and_damage_taken(
                     "rank": None,
                     "out_of": None,
                 }
+
+        if needs_mana_recovery:
+            # Healers only — paginate the player's resource events (= mana
+            # grants from Mana Tea, Innervate, potions, buff procs), drop
+            # any non-mana entries, and aggregate per ability with their
+            # fight-relative timestamps. WCL events are report-relative,
+            # so we need the WCL fight start offset that the import flow
+            # stashes in ``fight.extras['wcl_fight_start_ms']``. Falls
+            # back to 0 (so seconds will look weird) only for fights
+            # imported before that field existed.
+            fight_extras = fight.extras or {}
+            fight_start_ms = int(fight_extras.get("wcl_fight_start_ms") or 0)
+            try:
+                collected: list[dict[str, Any]] = []
+                next_ts: float | None = None
+                for _ in range(8):  # cap = 8k events worst case, plenty
+                    args: dict[str, Any] = {
+                        "code": code,
+                        "fightIDs": [fight_id],
+                        "sourceID": actor_id,
+                    }
+                    if next_ts is not None:
+                        args["startTime"] = next_ts
+                    resp = await client.query(REPORT_PLAYER_RESOURCE_EVENTS, args)
+                    page, next_ts = parse_player_resource_events_page(resp)
+                    collected.extend(page)
+                    if next_ts is None:
+                        break
+                extras["mana_recovery"] = aggregate_mana_recovery(
+                    collected, fight_start_ms=fight_start_ms
+                )
+            except Exception:  # noqa: BLE001
+                logger.exception("Mana recovery events fetch failed; continuing without")
+                extras.setdefault(
+                    "mana_recovery",
+                    {"total_recovered_pct": 0.0, "recovery_sources": []},
+                )
     finally:
         if own:
             await client.aclose()
@@ -446,6 +510,17 @@ async def _collect_localized_names(
     for g in gear:
         if g.get("item_id"):
             item_ids.add(int(g["item_id"]))
+    # Boss-cast timeline IDs are spell IDs (the boss is casting actual
+    # spells), so they belong under kind=spell. Same goes for the
+    # reference-detail boss_casts further down.
+    for entry in fight_summary.get("boss_casts") or []:
+        if entry.get("ability_id"):
+            spell_ids.add(int(entry["ability_id"]))
+    # Mana-recovery ability IDs (Mana Tea / Innervate / potion / etc.)
+    # are real spells — the AI should be able to cite them by name.
+    for entry in (player_summary.get("mana_recovery") or {}).get("recovery_sources") or []:
+        if entry.get("ability_id"):
+            spell_ids.add(int(entry["ability_id"]))
 
     for ref in references:
         detail = ref.get("detail") or {}
@@ -465,6 +540,9 @@ async def _collect_localized_names(
         for tid in detail.get("talent_ids") or []:
             if tid:
                 talent_ids.add(int(tid))
+        for entry in detail.get("boss_casts") or []:
+            if entry.get("ability_id"):
+                spell_ids.add(int(entry["ability_id"]))
 
     names = await lookup_names(
         session,
@@ -481,6 +559,55 @@ async def _collect_localized_names(
         for eid, name in encounter_names.items():
             names[f"encounter:{eid}"] = name
     return names
+
+
+async def _collect_talent_spell_ids(
+    session: AsyncSession,
+    *,
+    player_summary: dict[str, Any],
+    references: list[dict[str, Any]],
+) -> dict[str, int]:
+    """Build a ``{TraitNodeEntry.ID: SpellID}`` map for every talent ID
+    that appears in the player_summary or any top-log reference detail.
+
+    Frontend uses this to turn ``[Label](talent:<id>)`` inline markdown
+    links into real Wowhead spell links — the TraitNodeEntry IDs WCL
+    ships collide with old MoP-era spell IDs, so we have to resolve
+    through ``wow_localizations.extras['spell_id']`` (populated by
+    ``_import_talents``) before linking. Missing entries silently fall
+    back to bold text on the frontend.
+    """
+    talent_ids: set[int] = set()
+    for tid in player_summary.get("talent_ids") or []:
+        if tid:
+            talent_ids.add(int(tid))
+    for ref in references:
+        for tid in (ref.get("detail") or {}).get("talent_ids") or []:
+            if tid:
+                talent_ids.add(int(tid))
+    if not talent_ids:
+        return {}
+    # One row per talent (en locale — extras['spell_id'] is locale-
+    # agnostic). UNIQUE constraint on (kind, game_id, locale) means
+    # we only ever get one row per ID.
+    rows = (
+        await session.execute(
+            select(WowLocalization.game_id, WowLocalization.extras)
+            .where(WowLocalization.kind == "talent")
+            .where(WowLocalization.locale == "en")
+            .where(WowLocalization.game_id.in_(talent_ids))
+        )
+    ).all()
+    out: dict[str, int] = {}
+    for game_id, extras in rows:
+        spell_id = (extras or {}).get("spell_id")
+        if not spell_id:
+            continue
+        try:
+            out[str(int(game_id))] = int(spell_id)
+        except (TypeError, ValueError):
+            continue
+    return out
 
 
 async def request_analysis(
@@ -518,6 +645,67 @@ async def request_analysis(
     ).scalar_one_or_none()
     if not report or report.id != fight.report_id:
         raise NotFoundError("Report mismatch.")
+
+    # ----- Auto-refresh stale data before running the analysis ---------------
+    # When the code shipped a new field since this report (or its cached
+    # top-log references) was imported, the analyser would otherwise read
+    # missing fields and the AI prompt would silently lose features.
+    # ``REPORT_DATA_VERSION`` / ``TOP_LOG_DETAIL_VERSION`` are bumped by the
+    # importer code when the shape changes; we compare against the stored
+    # ``_v`` stamp and re-fetch when behind. Failures are logged but never
+    # blocking — we proceed with whatever data we have, the AI degrades
+    # gracefully on missing fields.
+    from app.services.report_service import (
+        REPORT_DATA_VERSION as _RDV,
+        report_data_is_current,
+        run_report_import,
+    )
+
+    if not await report_data_is_current(session, report.id):
+        logger.info(
+            "report %s data older than v%d — auto-refreshing before analysis",
+            report.id,
+            _RDV,
+        )
+        try:
+            async with WclClient() as wcl:
+                await run_report_import(session, report_id=report.id, wcl_client=wcl)
+            await session.commit()
+            # Re-load fight + player after the import wiped + re-inserted them.
+            fight = (
+                await session.execute(
+                    select(ReportFight).where(
+                        ReportFight.report_id == report.id,
+                        ReportFight.fight_id == fight.fight_id,
+                    )
+                )
+            ).scalar_one_or_none()
+            player = (
+                await session.execute(
+                    select(ReportPlayer)
+                    .where(
+                        ReportPlayer.fight_id == fight.id if fight else False,
+                        ReportPlayer.actor_id == player.actor_id,
+                    )
+                    .options(
+                        selectinload(ReportPlayer.casts),
+                        selectinload(ReportPlayer.gear),
+                    )
+                )
+            ).scalar_one_or_none()
+            if not fight or not player:
+                raise UpstreamError(
+                    "Report data was refreshed but the original fight/player "
+                    "rows could not be re-located — the underlying WCL log "
+                    "may have changed."
+                )
+        except UpstreamError:
+            raise
+        except Exception:  # noqa: BLE001
+            logger.exception(
+                "Auto-refresh of report %s failed — continuing with stale data",
+                report.id,
+            )
 
     role_focus = "healer" if player.role == "healer" else ("tank" if player.role == "tank" else "dps")
 
@@ -579,6 +767,12 @@ async def request_analysis(
         "duration_ms": fight.duration_ms,
         "boss_percentage": fight.boss_percentage,
         "phase_transitions": fight_extras.get("phase_transitions") or [],
+        # Per-ability boss-cast timeline (fight-relative seconds since
+        # fight start). One entry per top-N boss ability with the cast
+        # count and a sample of timestamps. Lets the AI infer the cycle
+        # period of each ability and judge whether the player's defensive
+        # cooldown frequency matched the boss-pressure cadence.
+        "boss_casts": fight_extras.get("boss_casts") or [],
     }
     player_extras = player.extras or {}
     parse_metrics = player_extras.get("parse_metrics") or {}
@@ -604,6 +798,17 @@ async def request_analysis(
         "buffs": player_extras.get("buffs") or [],
         "debuffs": player_extras.get("debuffs") or [],
         "damage_taken": player_extras.get("damage_taken") or [],
+        # Healer-only: explicit mana-grant timeline (Mana Tea / Innervate /
+        # potion procs / buff-driven mana restoration). WCL's public API
+        # does NOT expose absolute mana levels or cast costs — only these
+        # explicit grants are observable. The AI combines this with the
+        # player's cast count + class-spell knowledge from its training
+        # to estimate whether mana pressure was an actual constraint.
+        # Empty / zero on non-healers.
+        "mana_recovery": player_extras.get("mana_recovery") or {
+            "total_recovered_pct": 0.0,
+            "recovery_sources": [],
+        },
         # WCL parse percentile (vs all public logs) and ilvl-bracket
         # percentile (vs same-gear-bracket logs, gear-normalised). Both 0-100
         # (higher=better) or null when WCL has no ranking data for this
@@ -739,6 +944,9 @@ async def request_analysis(
         gear=gear,
         references=references,
     )
+    talent_spell_ids = await _collect_talent_spell_ids(
+        session, player_summary=player_summary, references=references
+    )
 
     # If the row already exists (worker path), it tells us whether BYOK was
     # requested. New rows fall through to the app-wide path.
@@ -833,6 +1041,11 @@ async def request_analysis(
         analysis.structured = {
             **(response.structured or {}),
             "_localized_names": localized_names,
+            # ``[Label](talent:<id>)`` markdown links in the AI's prose
+            # carry TraitNodeEntry IDs (different namespace from spell
+            # IDs). Frontend resolves to the underlying spell ID via
+            # this map before linking to Wowhead.
+            "_talent_spell_ids": talent_spell_ids,
             "_parse_metrics": {
                 "parse_percent": parse_metrics.get("rank_percent"),
                 "ilvl_percent": parse_metrics.get("ilvl_percent"),

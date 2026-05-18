@@ -8,6 +8,12 @@ from app.models.report import Report, ReportFight, ReportPlayer, ReportPlayerCas
 from app.models.top_log import TopLog
 from app.models.top_logs_seed_job import TopLogsSeedJob
 from app.models.analysis import Analysis, AnalysisStatus
+from app.models.simulation import (
+    Simulation,
+    SimulationRun,
+    SimulationRunStatus,
+    SimulationStatus,
+)
 from app.models.user_ai_config import UserAiConfig
 from app.models.wcl_connection import UserWclConnection
 from app.models.wow_data import WowDataImport, WowImportStatus, WowLocalization
@@ -26,6 +32,10 @@ __all__ = [
     "ReportPlayerCast",
     "ReportPlayerGear",
     "Role",
+    "Simulation",
+    "SimulationRun",
+    "SimulationRunStatus",
+    "SimulationStatus",
     "TopLog",
     "TopLogsSeedJob",
     "User",

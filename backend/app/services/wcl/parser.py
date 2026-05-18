@@ -44,21 +44,71 @@ def parse_report_overview(payload: dict[str, Any]) -> dict[str, Any]:
     zone = report.get("zone") or {}
     region = report.get("region") or {}
     fights_in = report.get("fights") or []
+
+    # Encounter-level phase metadata: ``{encounter_id: {phase_id: {name, is_intermission}}}``.
+    # WCL ships this in ``Report.phases`` as a list of (encounterID, phases[])
+    # entries. We zip it onto each fight's transitions below so the AI gets
+    # human-readable labels instead of bare numeric IDs.
+    phase_meta: dict[int, dict[int, dict[str, Any]]] = {}
+    for pm in (report.get("phases") or []) if isinstance(report.get("phases"), list) else []:
+        try:
+            eid = int(pm.get("encounterID", 0))
+        except (TypeError, ValueError):
+            continue
+        if not eid:
+            continue
+        slot: dict[int, dict[str, Any]] = {}
+        for ph in pm.get("phases") or []:
+            try:
+                pid = int(ph.get("id", 0))
+            except (TypeError, ValueError):
+                continue
+            slot[pid] = {
+                "name": str(ph.get("name") or "").strip(),
+                "is_intermission": bool(ph.get("isIntermission")),
+            }
+        if slot:
+            phase_meta[eid] = slot
+
     fights = []
     for f in fights_in:
-        start_ms = report["startTime"] + f.get("startTime", 0)
-        end_ms = report["startTime"] + f.get("endTime", f.get("startTime", 0))
-        # Phase transitions are reported in ms relative to fight start; we keep
-        # them like that for compactness and let the AI/UI normalise as needed.
-        phase_transitions = [
-            {"id": int(p.get("id", 0)), "start_ms": int(p.get("startTime", 0))}
-            for p in (f.get("phaseTransitions") or [])
-            if p
-        ]
+        fight_start_offset_ms = int(f.get("startTime", 0))
+        start_ms = report["startTime"] + fight_start_offset_ms
+        end_ms = report["startTime"] + f.get("endTime", fight_start_offset_ms)
+        enc_id = int(f["encounterID"]) if f.get("encounterID") else None
+        meta_for_fight = phase_meta.get(enc_id) if enc_id is not None else None
+        # IMPORTANT: WCL's ``phaseTransition.startTime`` is ms *from the
+        # report's startTime*, NOT from the fight's startTime — the old
+        # comment claiming otherwise was wrong. Without normalisation the
+        # AI saw values like 5.7M ms on a 340k-ms fight and (correctly)
+        # called the data unusable. Subtract the fight's own offset and
+        # convert to seconds since fight-start (more compact and directly
+        # comparable to the ``duration_minutes`` we already ship).
+        phase_transitions: list[dict[str, Any]] = []
+        for p in f.get("phaseTransitions") or []:
+            if not p:
+                continue
+            try:
+                pid = int(p.get("id", 0))
+                raw_ms = int(p.get("startTime", 0))
+            except (TypeError, ValueError):
+                continue
+            offset_ms = max(0, raw_ms - fight_start_offset_ms)
+            entry: dict[str, Any] = {
+                "id": pid,
+                "start_seconds": round(offset_ms / 1000, 1),
+            }
+            if meta_for_fight is not None:
+                m = meta_for_fight.get(pid)
+                if m and m.get("name"):
+                    entry["name"] = m["name"]
+                if m and m.get("is_intermission"):
+                    entry["is_intermission"] = True
+            phase_transitions.append(entry)
         fights.append(
             {
                 "fight_id": int(f["id"]),
-                "encounter_id": int(f["encounterID"]) if f.get("encounterID") else None,
+                "encounter_id": enc_id,
                 "name": f.get("name") or "",
                 "difficulty": f.get("difficulty"),
                 "keystone_level": f.get("keystoneLevel"),
@@ -66,7 +116,14 @@ def parse_report_overview(payload: dict[str, Any]) -> dict[str, Any]:
                 "boss_percentage": f.get("bossPercentage"),
                 "duration_ms": max(0, int(end_ms - start_ms)),
                 "start_time": _ms_to_dt(start_ms),
-                "extras": {"phase_transitions": phase_transitions},
+                "extras": {
+                    "phase_transitions": phase_transitions,
+                    # WCL's report.events ships timestamps in this same
+                    # report-relative offset space, so the import flow uses
+                    # this value to convert boss-cast timestamps into
+                    # fight-relative seconds. Keep it cheap to fetch later.
+                    "wcl_fight_start_ms": fight_start_offset_ms,
+                },
             }
         )
     return {
@@ -523,6 +580,239 @@ def parse_aura_table(payload: dict[str, Any]) -> list[dict[str, Any]]:
         )
     out.sort(key=lambda e: e["total_uptime_ms"], reverse=True)
     return out[:25]
+
+
+def parse_enemy_cast_events_page(payload: dict[str, Any]) -> tuple[list[dict[str, Any]], float | None]:
+    """Pull one page of enemy ``Casts`` events out of a ``report.events`` response.
+
+    Returns ``(events, next_page_timestamp)``. ``data`` ships as either a
+    JSON string or an already-decoded list depending on WCL's mood; we
+    handle both. Only ``type='cast'`` events are kept (``begincast`` is
+    the start-of-cast signal — for boss-pressure analysis we want the
+    actual hit moment, not the wind-up).
+    """
+    import json as _json
+
+    rd = (payload or {}).get("reportData", {})
+    report = rd.get("report") if rd else None
+    events_blob = (report or {}).get("events") or {}
+    next_ts = events_blob.get("nextPageTimestamp")
+    raw = events_blob.get("data") or []
+    if isinstance(raw, str):
+        try:
+            raw = _json.loads(raw)
+        except (ValueError, TypeError):
+            raw = []
+    if not isinstance(raw, list):
+        raw = []
+    out: list[dict[str, Any]] = []
+    for ev in raw:
+        if not isinstance(ev, dict):
+            continue
+        if ev.get("type") != "cast":
+            continue
+        try:
+            ability_id = int(ev.get("abilityGameID") or 0)
+            ts = int(ev.get("timestamp") or 0)
+        except (TypeError, ValueError):
+            continue
+        if not ability_id:
+            continue
+        out.append({"ability_id": ability_id, "timestamp_ms": ts})
+    return out, (float(next_ts) if next_ts is not None else None)
+
+
+def aggregate_boss_casts(
+    events: list[dict[str, Any]],
+    *,
+    fight_start_ms: int,
+    top_n_abilities: int = 6,
+    max_samples_per_ability: int = 10,
+) -> list[dict[str, Any]]:
+    """Collapse a flat list of cast events into a compact per-ability summary.
+
+    Output shape (one entry per ability, sorted by cast count descending):
+
+    ``{ability_id, count, cast_seconds: [t0, t1, ...]}``
+
+    ``cast_seconds`` lists *fight-relative* seconds since fight start
+    (negative values from pre-pull buffs are clamped to 0) so the AI can
+    eyeball the cycle period without doing the conversion itself.
+
+    We cap the list to ``max_samples_per_ability`` per ability and
+    ``top_n_abilities`` total — that's enough to see the pattern (4-5
+    samples already reveal the cycle) without exploding the prompt for
+    long pull-heavy fights.
+    """
+    if not events:
+        return []
+    by_id: dict[int, list[int]] = {}
+    for ev in events:
+        aid = int(ev.get("ability_id") or 0)
+        ts = int(ev.get("timestamp_ms") or 0)
+        if not aid:
+            continue
+        by_id.setdefault(aid, []).append(ts)
+    ranked = sorted(
+        by_id.items(), key=lambda kv: (-len(kv[1]), kv[0])
+    )[:top_n_abilities]
+    out: list[dict[str, Any]] = []
+    for aid, ts_list in ranked:
+        ts_list.sort()
+        # Sample evenly across the timeline. Anchor on the first AND last
+        # cast so the AI can derive the true cycle period via
+        # ``(max-min)/(count-1)`` on the sample — if we used a plain
+        # ``int(i*step)`` scheme the tail would be cut off (e.g. for 92
+        # entries we'd top out at index 81, throwing off any cycle math
+        # using ``count``).
+        if len(ts_list) > max_samples_per_ability:
+            n = max_samples_per_ability
+            ts_list = [
+                ts_list[round(i * (len(ts_list) - 1) / (n - 1))] for i in range(n)
+            ]
+        cast_seconds = [
+            round(max(0, t - fight_start_ms) / 1000, 1) for t in ts_list
+        ]
+        out.append(
+            {
+                "ability_id": aid,
+                "count": len(by_id[aid]),
+                "cast_seconds": cast_seconds,
+            }
+        )
+    return out
+
+
+def parse_player_resource_events_page(
+    payload: dict[str, Any], *, resource_type: int = 0
+) -> tuple[list[dict[str, Any]], float | None]:
+    """Pull one page of mana ``resourcechange`` events for a single player.
+
+    WCL's resource events only ever cover *explicit grants* (Mana Tea,
+    Innervate, potions, buff procs). Cast costs are deducted by the
+    client and never emitted as events — so every event we see is a
+    positive mana gain. Returns ``(events, next_page_timestamp)``.
+
+    ``resource_type`` defaults to ``0`` = mana. Each kept event has
+    ``timestamp_ms`` (report-relative), ``ability_id``, ``amount``
+    (raw resource units gained), ``max_resource`` (the player's max
+    pool at the time of the event — needed to express the amount as a
+    percentage at aggregation time), and ``waste`` (overcap).
+    """
+    import json as _json
+
+    rd = (payload or {}).get("reportData", {})
+    report = rd.get("report") if rd else None
+    events_blob = (report or {}).get("events") or {}
+    next_ts = events_blob.get("nextPageTimestamp")
+    raw = events_blob.get("data") or []
+    if isinstance(raw, str):
+        try:
+            raw = _json.loads(raw)
+        except (ValueError, TypeError):
+            raw = []
+    if not isinstance(raw, list):
+        raw = []
+    out: list[dict[str, Any]] = []
+    for ev in raw:
+        if not isinstance(ev, dict):
+            continue
+        if ev.get("type") != "resourcechange":
+            continue
+        if ev.get("resourceChangeType") != resource_type:
+            continue
+        try:
+            ability_id = int(ev.get("abilityGameID") or 0)
+            ts = int(ev.get("timestamp") or 0)
+            amount = int(ev.get("resourceChange") or 0)
+            max_res = int(ev.get("maxResourceAmount") or 0)
+        except (TypeError, ValueError):
+            continue
+        if not ability_id or amount <= 0 or max_res <= 0:
+            continue
+        out.append(
+            {
+                "ability_id": ability_id,
+                "timestamp_ms": ts,
+                "amount": amount,
+                "max_resource": max_res,
+                "waste": int(ev.get("waste") or 0),
+            }
+        )
+    return out, (float(next_ts) if next_ts is not None else None)
+
+
+def aggregate_mana_recovery(
+    events: list[dict[str, Any]],
+    *,
+    fight_start_ms: int,
+) -> dict[str, Any]:
+    """Collapse a player's mana-grant events into a compact prompt-friendly summary.
+
+    Output shape::
+
+        {
+          "total_recovered_pct": 145.2,
+          "recovery_sources": [
+            {
+              "ability_id": 115294,
+              "count": 5,
+              "total_pct": 10.5,
+              "timestamps_seconds": [12, 95, 178, 261, 359],
+            },
+            ...
+          ]
+        }
+
+    ``total_recovered_pct`` is the sum of all grants expressed as a
+    percentage of the player's max pool — values above 100% are normal
+    on long fights with frequent Mana Tea / potions / etc. The AI uses
+    this together with the player's cast count to estimate whether
+    sustain matched the cast pressure.
+
+    ``recovery_sources`` is sorted by total contribution and capped at
+    the top 6 abilities; each entry exposes its own per-cast timestamps
+    so the AI can spot long gaps between grants (= probable mana dip).
+    """
+    if not events:
+        return {"total_recovered_pct": 0.0, "recovery_sources": []}
+    by_id: dict[int, list[dict[str, Any]]] = {}
+    for ev in events:
+        aid = int(ev.get("ability_id") or 0)
+        if not aid:
+            continue
+        by_id.setdefault(aid, []).append(ev)
+
+    sources: list[dict[str, Any]] = []
+    total_pct = 0.0
+    for aid, evs in by_id.items():
+        # Each event has its own max_resource snapshot; for the
+        # percentage we use the largest max seen (mana pool can grow
+        # mid-fight from buffs/trinkets but the difference is tiny).
+        max_res = max((e.get("max_resource") or 1) for e in evs)
+        sum_amount = sum(int(e.get("amount") or 0) for e in evs)
+        pct = (sum_amount / max_res) * 100 if max_res else 0.0
+        total_pct += pct
+        # Timestamps in fight-relative seconds (integer is enough — we're
+        # looking at >1s resolution anyway).
+        evs.sort(key=lambda e: int(e.get("timestamp_ms") or 0))
+        ts_sec = [
+            max(0, round((int(e.get("timestamp_ms") or 0) - fight_start_ms) / 1000))
+            for e in evs
+        ]
+        sources.append(
+            {
+                "ability_id": aid,
+                "count": len(evs),
+                "total_pct": round(pct, 1),
+                "timestamps_seconds": ts_sec,
+            }
+        )
+    sources.sort(key=lambda s: -s["total_pct"])
+    return {
+        "total_recovered_pct": round(total_pct, 1),
+        "recovery_sources": sources[:6],
+    }
 
 
 def parse_damage_taken_table(payload: dict[str, Any]) -> list[dict[str, Any]]:

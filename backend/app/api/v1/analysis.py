@@ -1,6 +1,7 @@
 """Endpoints for AI analyses."""
 from __future__ import annotations
 
+import secrets
 import uuid
 from typing import Any
 
@@ -22,6 +23,7 @@ from app.schemas.analysis import (
     AnalysisIn,
     AnalysisListItem,
     AnalysisOut,
+    AnalysisPublicOut,
     PaginatedAnalyses,
 )
 from app.services.ai import analyzer
@@ -304,3 +306,137 @@ async def delete_analysis(
         raise ForbiddenError("You can only delete your own analyses.")
     await session.delete(row)
     await session.commit()
+
+
+# --- Public share (per-analysis opt-in) --------------------------------------
+
+
+def _make_share_token() -> str:
+    """Generate a cryptographically random URL-safe token.
+
+    ``token_urlsafe(32)`` yields a 43-character base64url string with 256
+    bits of entropy — guessing one is statistically impossible even at
+    internet-scale brute force, and the column is unique-indexed so a
+    fluke collision would be rejected by the DB rather than leaking
+    another user's analysis.
+    """
+    return secrets.token_urlsafe(32)
+
+
+@router.post("/{analysis_id}/share", response_model=AnalysisOut)
+async def enable_analysis_share(
+    analysis_id: uuid.UUID,
+    session: SessionDep,
+    user: CurrentUser,
+) -> AnalysisOut:
+    """Mint a share token for one analysis, or return the existing one.
+
+    Idempotent: re-calling on an already-shared analysis returns the same
+    token. The owner can rotate by calling ``DELETE`` then ``POST`` again.
+    """
+    row = (
+        await session.execute(select(Analysis).where(Analysis.id == analysis_id))
+    ).scalar_one_or_none()
+    if not row:
+        raise NotFoundError("Analysis not found.")
+    if row.requested_by_id != user.id and user.role != UserRole.admin:
+        raise ForbiddenError("You can only share your own analyses.")
+    if not row.share_token:
+        row.share_token = _make_share_token()
+        await session.commit()
+        await session.refresh(row)
+    return AnalysisOut.model_validate(row)
+
+
+@router.delete("/{analysis_id}/share", response_model=AnalysisOut)
+async def disable_analysis_share(
+    analysis_id: uuid.UUID,
+    session: SessionDep,
+    user: CurrentUser,
+) -> AnalysisOut:
+    """Revoke the share token. The link becomes 404 for anonymous viewers.
+
+    Returning the updated analysis row keeps the frontend cache in sync
+    with one round-trip — no need for a separate refetch to flip the
+    "Share is on" badge off.
+    """
+    row = (
+        await session.execute(select(Analysis).where(Analysis.id == analysis_id))
+    ).scalar_one_or_none()
+    if not row:
+        raise NotFoundError("Analysis not found.")
+    if row.requested_by_id != user.id and user.role != UserRole.admin:
+        raise ForbiddenError("You can only share your own analyses.")
+    if row.share_token is not None:
+        row.share_token = None
+        await session.commit()
+        await session.refresh(row)
+    return AnalysisOut.model_validate(row)
+
+
+async def fetch_shared_analysis(
+    share_token: str, session: SessionDep, locale: LocaleDep
+) -> AnalysisPublicOut:
+    """Anonymous read of an analysis by its share token. No auth required.
+
+    Returns 404 (not 401/403) for any unknown token so the endpoint can't
+    be used as an oracle: an attacker probing token strings sees identical
+    responses for "doesn't exist" vs "exists but private" — but the
+    private case never reaches us because the token IS the private flag.
+
+    We strip every field that could pivot to other resources or leak
+    owner / billing metadata. See ``AnalysisPublicOut`` for the exact
+    shape.
+    """
+    # Single-roundtrip pull with the joined rows we need to render
+    # encounter / player display strings without auth.
+    row = (
+        await session.execute(
+            select(Analysis).where(Analysis.share_token == share_token)
+        )
+    ).scalar_one_or_none()
+    if not row or not row.share_token:
+        raise NotFoundError("Shared analysis not found.")
+    fight = (
+        await session.execute(select(ReportFight).where(ReportFight.id == row.fight_id))
+    ).scalar_one_or_none()
+    player = (
+        await session.execute(select(ReportPlayer).where(ReportPlayer.id == row.player_id))
+    ).scalar_one_or_none()
+    report = (
+        await session.execute(select(Report).where(Report.id == row.report_id))
+    ).scalar_one_or_none()
+
+    # Localised encounter name in the viewer's locale (not the owner's,
+    # so a German viewer sees German boss names on an English analysis).
+    fight_name_localized: str | None = None
+    if fight and fight.encounter_id:
+        names = await resolve_encounter_names_with_fallback(
+            session,
+            locale=(locale or row.locale or "en"),
+            encounters=[(int(fight.encounter_id), fight.name or "")],
+        )
+        fight_name_localized = names.get(int(fight.encounter_id))
+
+    return AnalysisPublicOut(
+        id=row.id,
+        status=row.status,
+        locale=row.locale,
+        provider=row.provider,
+        model=row.model,
+        summary=row.summary,
+        structured=row.structured or {},
+        created_at=row.created_at,
+        updated_at=row.updated_at,
+        report_code=report.wcl_code if report else "",
+        fight_name=fight.name if fight else "",
+        fight_name_localized=fight_name_localized,
+        encounter_id=fight.encounter_id if fight else None,
+        is_kill=bool(fight.is_kill) if fight else False,
+        duration_ms=int(fight.duration_ms) if fight else 0,
+        boss_percentage=fight.boss_percentage if fight else None,
+        player_name=player.name if player else "",
+        player_server=player.server if player else "",
+        player_class=player.class_slug if player else "",
+        player_spec=player.spec_slug if player else "",
+    )

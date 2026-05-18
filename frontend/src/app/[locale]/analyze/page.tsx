@@ -6,6 +6,7 @@ import { useTranslations } from "next-intl";
 import { use, useEffect, useRef, useState } from "react";
 
 import { AnalysisCard } from "@/components/AnalysisCard";
+import { AnalysisShareControls } from "@/components/AnalysisShareControls";
 import { AuthGuard } from "@/components/AuthGuard";
 import { ClassBadge } from "@/components/ClassBadge";
 import { EmptyState } from "@/components/EmptyState";
@@ -238,7 +239,15 @@ function AnalyzeView({ locale }: { locale: Locale }) {
       />
 
       {historicalAnalysisId && historicalAnalysisQ.data && (
-        <AnalysisCard analysis={historicalAnalysisQ.data} locale={locale} />
+        <>
+          {historicalAnalysisQ.data.status === "succeeded" && (
+            <AnalysisShareControls
+              analysis={historicalAnalysisQ.data}
+              locale={locale}
+            />
+          )}
+          <AnalysisCard analysis={historicalAnalysisQ.data} locale={locale} />
+        </>
       )}
 
       {myReportsQ.data && myReportsQ.data.items.length > 0 && (
@@ -756,7 +765,17 @@ function PlayersTable({
           <p className="text-sm text-yellow-200">{analyzeError}</p>
         </Card>
       )}
-      {analysisQ.data && <AnalysisCard analysis={analysisQ.data} locale={locale} />}
+      {analysisQ.data && (
+        <>
+          {analysisQ.data.status === "succeeded" && (
+            <AnalysisShareControls
+              analysis={analysisQ.data}
+              locale={locale}
+            />
+          )}
+          <AnalysisCard analysis={analysisQ.data} locale={locale} />
+        </>
+      )}
     </div>
   );
 }

@@ -184,7 +184,52 @@ services:
       retries: 5
       start_period: 60s
 
+  # SimulationCraft sidecar. Wraps the upstream simulationcraftorg/simc
+  # image with a tiny FastAPI server that exposes /simulate, /version
+  # and /healthz on :8090. The backend worker hits this on the compose
+  # network — no Docker socket access needed for runs themselves.
+  #
+  # Part of the default stack (no compose profile) so /simulate works
+  # out of the box. Admins can bump to the latest upstream simc daily
+  # (DBC data + binary) from the admin UI via ADMIN_DOCKER_CONTROL →
+  # docker-socket mount on the backend container.
+  simc:
+    # Image name matches the CI publish target on ghcr.io
+    # (``wow-ai-log-analyzer-simc``). The historical
+    # ``SIMC_SIDECAR_IMAGE`` env var still works as an override.
+    image: ${SIMC_SIDECAR_IMAGE:-wow-ai-log-analyzer-simc:latest}
+    build:
+      context: ./simc-sidecar
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    environment:
+      # Cap on simc's thread pool per request. 0 = simc decides (one
+      # per logical CPU). Conservative 4 leaves plenty of cores free
+      # for the rest of the stack; bump if sims feel slow.
+      SIMC_DEFAULT_THREADS: ${SIMC_DEFAULT_THREADS:-4}
+      SIMC_TIMEOUT_S: ${SIMC_TIMEOUT_S:-1800}
+      # Failed simc runs save the exact input.simc + args + log to
+      # this directory so we can pull them out via the named volume
+      # and bisect down to whatever item / item-thread interaction
+      # simc tripped over. Bounded by simple disk eviction (manual rm).
+      SIMC_CRASH_DUMP_DIR: /crashes
+    volumes:
+      - simc-crash-dumps:/crashes
+    expose:
+      - "8090"
+    healthcheck:
+      test:
+        - "CMD"
+        - "python3"
+        - "-c"
+        - "import urllib.request,sys; urllib.request.urlopen('http://127.0.0.1:8090/healthz'); sys.exit(0)"
+      interval: 30s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+
 volumes:
   postgres-data:
   redis-data:
   llama-cache:
+  simc-crash-dumps:

@@ -254,6 +254,16 @@ export interface AnalysisStructured {
   // Underscore-prefixed fields are NOT produced by the AI — they are
   // server-side metadata stitched into the structured output before save.
   _localized_names?: Record<string, string>;
+  /**
+   * Maps a ``TraitNodeEntry.ID`` (what WCL ships in
+   * ``combatantInfo.talentTree`` and what the AI puts inside
+   * ``[Label](talent:<id>)`` inline markdown links) to the underlying
+   * Wowhead-resolvable spell ID. Without this we'd render
+   * ``/spell/<traitNodeEntryId>`` URLs that point to unrelated MoP-era
+   * spells (the ID spaces collide), so the resolver hides the link and
+   * shows bold text instead when an entry is missing.
+   */
+  _talent_spell_ids?: Record<string, number>;
   _parse_metrics?: {
     parse_percent: number | null;
     ilvl_percent: number | null;
@@ -275,6 +285,42 @@ export interface Analysis {
   completion_tokens: number;
   created_at: string;
   updated_at: string;
+  /**
+   * Raw share token when the owner has enabled public sharing. ``null``
+   * means the analysis is private. Only ever populated on authenticated
+   * reads — the anonymous ``GET /shared-analyses/{token}`` endpoint
+   * never echoes it back (the viewer already has it in the URL).
+   */
+  share_token: string | null;
+}
+
+/**
+ * Anonymous-read view of a single analysis served by
+ * ``GET /shared-analyses/{token}``. Excludes ``share_token`` itself,
+ * raw foreign-key UUIDs, token counts and the ``error`` blob — only
+ * the structured findings + the public WCL context for rendering.
+ */
+export interface AnalysisPublicOut {
+  id: string;
+  status: "pending" | "running" | "succeeded" | "failed";
+  locale: string;
+  provider: string;
+  model: string;
+  summary: string;
+  structured: AnalysisStructured | Record<string, never>;
+  created_at: string;
+  updated_at: string;
+  report_code: string;
+  fight_name: string;
+  fight_name_localized: string | null;
+  encounter_id: number | null;
+  is_kill: boolean;
+  duration_ms: number;
+  boss_percentage: number | null;
+  player_name: string;
+  player_server: string;
+  player_class: string;
+  player_spec: string;
 }
 
 export interface PaginatedAnalyses {
@@ -416,4 +462,134 @@ export interface TopLogsCurrentTierResponse {
     expansion_id: number;
     expansion_name: string;
   }>;
+}
+
+// --- SimulationCraft -------------------------------------------------------
+
+export type SimcRotation = "simc_default" | "blizzard" | "custom";
+export type SimcFightProfile = "single_target" | "council" | "mythic_plus" | "custom";
+export type SimulationStatus = "pending" | "running" | "succeeded" | "failed";
+export type SimcPrecision = "fast" | "medium" | "precise";
+
+export interface SimulationLoadoutIn {
+  name: string;
+  talents: string;
+}
+
+export interface CustomProfileOverrides {
+  fight_style: string;
+  desired_targets: number;
+  max_time: number;
+  target_error: number;
+}
+
+export interface SimulationAbility {
+  name: string;
+  spell_id: number;
+  spell_name: string;
+  school: string;
+  dps: number;
+  pct: number;
+  damage_per_iter: number;
+  executes: number;
+  hits: number;
+  crit_pct: number;
+}
+
+export interface SimulationRunOut {
+  id: string;
+  simulation_id: string;
+  loadout_index: number;
+  loadout_name: string;
+  rotation: SimcRotation;
+  fight_profile_key: SimcFightProfile;
+  status: SimulationStatus;
+  dps_mean: number;
+  dps_min: number;
+  dps_max: number;
+  dps_stddev: number;
+  fight_length_mean: number;
+  abilities: SimulationAbility[];
+  error: string | null;
+  started_at: string | null;
+  finished_at: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface Simulation {
+  id: string;
+  requested_by_id: string | null;
+  label: string;
+  simc_profile: string;
+  loadouts: SimulationLoadoutIn[];
+  fight_profiles: SimcFightProfile[];
+  rotations: SimcRotation[];
+  iterations: number;
+  precision: SimcPrecision;
+  custom_overrides: CustomProfileOverrides | null;
+  status: SimulationStatus;
+  error: string | null;
+  started_at: string | null;
+  finished_at: string | null;
+  simc_build: string | null;
+  created_at: string;
+  updated_at: string;
+  runs: SimulationRunOut[];
+}
+
+export interface SimulationListItem {
+  id: string;
+  label: string;
+  status: SimulationStatus;
+  iterations: number;
+  precision: SimcPrecision;
+  fight_profiles: SimcFightProfile[];
+  rotations: SimcRotation[];
+  loadout_count: number;
+  created_at: string;
+  finished_at: string | null;
+}
+
+export interface PaginatedSimulations {
+  items: SimulationListItem[];
+  total: number;
+  page: number;
+  page_size: number;
+}
+
+export interface SimulationInfo {
+  fight_profiles: Array<{
+    key: SimcFightProfile;
+    fight_style: string;
+    desired_targets: number;
+    max_time: number | null;
+    target_error: number | null;
+    label_en: string;
+    label_de: string;
+  }>;
+  custom_defaults: CustomProfileOverrides;
+  supported_fight_styles: Array<{ key: string; label: string }>;
+  rotations: SimcRotation[];
+  precisions: Array<{ key: "fast" | "medium" | "precise"; iterations: number }>;
+  default_precision: "fast" | "medium" | "precise";
+  default_iterations: number;
+  max_loadouts: number;
+  retention_days: number;
+  simc_build: string;
+  sidecar_reachable: boolean;
+}
+
+export interface SidecarStatus {
+  reachable: boolean;
+  queued: number;
+  running: number;
+  max_concurrent: number;
+}
+
+export interface SimcStatus {
+  reachable: boolean;
+  build_banner: string;
+  base_url: string;
+  container: ContainerStatus | null;
 }

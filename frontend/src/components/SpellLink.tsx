@@ -15,7 +15,7 @@ export function SpellLink({ spellId, locale, fallback }: Props) {
       target="_blank"
       rel="noopener noreferrer"
       data-wh-icon-size="small"
-      className="inline-flex items-center gap-1 text-accent hover:underline"
+      className="inline-flex items-center gap-1 align-middle text-accent hover:underline"
     >
       {fallback ?? `Spell ${spellId}`}
     </a>

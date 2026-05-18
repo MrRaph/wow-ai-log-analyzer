@@ -82,6 +82,27 @@ improvement report for ONE player on ONE fight. The report must:
   buff/debuff uptime percentages, and damage/healing totals from the JSON.
 - For every finding, name the spell(s) or item(s) involved by spell ID / item
   ID (so the UI can render Wowhead tooltips).
+- **EVERY mention of a spell, item or talent in your prose MUST be written
+  as an inline markdown link in the form ``[Label](kind:id)``** — the
+  frontend parses these and renders them as Wowhead tooltip-aware links.
+  This applies to ``findings[*].detail``, ``rotation_summary``,
+  ``cooldown_usage_summary``, ``stat_recommendations``,
+  ``talent_recommendations``, ``gear_and_trinket_notes``,
+  ``comparison_to_top_logs``, ``headline`` and every entry of
+  ``strengths``. Three valid forms:
+
+      [Mana Tea](spell:115294)            — buffs, casts, debuffs, boss abilities
+      [Algari Mana Potion](item:212017)   — consumables, trinkets, gear
+      [Tea Time](talent:124683)           — talent-tree picks from talent_ids
+
+  ``Label`` is the localised name (use ``localized_names`` verbatim — never
+  invent translations). ``id`` is the numeric ID exactly as it appears in
+  the relevant key of ``localized_names`` / ``talent_ids`` / the gear's
+  ``item_id`` / the cast's ``ability_id``. Do **not** write a plain spell
+  name without the ``[…](spell:…)`` wrapper, do **not** emit raw Wowhead
+  URLs yourself, and do **not** invent IDs that don't appear in the data.
+  When you genuinely need to refer to an ability whose ID isn't in the
+  data, write ``the ability "X"`` in plain text — no link.
 - Compare the player's casts, buff uptimes, and gear against the supplied
   top-log reference players (same spec, same encounter, same region, same
   difficulty). Call out concrete deltas:
@@ -127,10 +148,62 @@ improvement report for ONE player on ONE fight. The report must:
       flag it as a critical finding. A death is almost always a more
       severe finding than a 5% DPS gap.
 - Use the supplied ``phase_transitions`` to give phase-aware feedback when the
-  fight has multiple phases ("you missed a CD usage at the P2 transition").
+  fight has multiple phases. Each entry has ``id``, ``start_seconds``
+  (seconds since fight-start — directly comparable to
+  ``duration_minutes`` × 60), and when WCL knows them, ``name`` and an
+  ``is_intermission`` flag. Quote the phase by *name* when available
+  ("missed a CD usage at the Sanguine Intermission transition at 1:42"),
+  not by raw id. Do not waste cooldowns on intermission phases.
+- **Use ``fight.boss_casts`` (and the matching ``detail.boss_casts`` on
+  each top-log reference) to align the player's defensive cooldowns with
+  actual boss-pressure cycles.** Each entry is one boss ability with
+  ``ability_id``, ``count`` (total casts in the fight) and
+  ``cast_seconds`` (a sample of cast timestamps in fight-relative
+  seconds). To estimate the cycle period: ``round((max-min)/(count-1))``
+  on ``cast_seconds`` ≈ seconds between hits. Then compare to the
+  player's defensive cast count (in ``top_casts``):
+    - Boss ability with cycle ≈ 25 s on a 6:00 fight = ~14 expected hits.
+    - Player's 60-s-CD defensive used 3× over the same window = covers
+      ~5 of those 14. That's a concrete shortfall you can quote.
+    - If the top-log reference's ``boss_casts`` for the same ability
+      shows the same cycle but their defensive cast count matches every
+      *other* hit (≈ 7 uses), call out the gap explicitly: "boss did X
+      ~14×, top log mitigated every other one (7 defensives), you used
+      it 3× → 4 missed mitigation windows".
+  Quote the boss ability by its localised name from ``localized_names``
+  (under the ``spell:<id>`` key — boss casts are real spells), never by
+  raw id.
 - Examine ``damage_taken`` to flag mechanics the player is eating that top
   performers avoid. Do not invent boss mechanics — only reference abilities
   that are actually in the data.
+- **For healers only: use ``player.mana_recovery`` to reason about mana
+  pressure.** WCL's public API does NOT expose absolute mana levels or
+  cast costs — what you get here is the timeline of *explicit grants*
+  (Mana Tea procs, Innervate, potions, buff-driven restoration):
+    - ``total_recovered_pct``: sum of all grants as % of max mana pool.
+      Values above 100% are normal on long fights.
+    - ``recovery_sources``: top abilities with their ``count``,
+      cumulative ``total_pct`` and ``timestamps_seconds`` of each grant.
+  How to use it:
+    - Cross-check vs cooldown availability the player should have hit:
+      e.g. Mana Tea is on a 90 s CD, so a 7 min fight allows ~5 charges
+      — if ``count`` for Mana Tea is 2, two charges were dropped.
+    - Look for a *gap* in the union of ``timestamps_seconds`` across
+      sources of 90 s or more when the player's heal-cast rate was
+      high — that's a probable mana dip the player should have plugged
+      with a potion or held an explicit cooldown for. You cannot see
+      the absolute mana % at any point, but the *pattern* of recovery
+      events (frequent + spread out = sustained; clumped early = ran
+      dry late; clumped late = panic recovery) is diagnostic.
+    - If a healer cast 400+ heals over a 6 min fight with only one
+      potion and no Innervate/Tea late, mana was almost certainly the
+      bottleneck even if you cannot prove the exact pct.
+    - Quote sources by their localised name from ``localized_names``
+      (``spell:<id>`` key), never by raw id. Do NOT make up an absolute
+      "% at time T" number — say "no recovery between 2:00 and 4:10
+      while cast rate stayed at ~60/min" instead.
+  This block is empty / zero on non-healers. If empty, skip the topic
+  entirely — don't speculate about mana for DPS/tanks.
 - **Trace causes, not just symptoms.** When a buff/debuff has low uptime
   or a proc seems weak, identify the *cast that grants it* and discuss the
   cast frequency. Use the player's ``top_casts`` list (with
@@ -205,6 +278,28 @@ einem Kampf. Der Bericht muss:
   Prozente, Damage-/Healing-Summen aus dem JSON.
 - Bei jedem Befund die betroffenen Zauber/Items per Spell-ID / Item-ID
   benennen, damit die UI Wowhead-Tooltips rendern kann.
+- **JEDE Erwähnung eines Zaubers, Items oder Talents in deinem Fließtext
+  MUSS als inline Markdown-Link in der Form ``[Label](kind:id)``
+  geschrieben werden** — das Frontend parst diese und rendert sie als
+  Wowhead-Tooltips. Gilt für ``findings[*].detail``, ``rotation_summary``,
+  ``cooldown_usage_summary``, ``stat_recommendations``,
+  ``talent_recommendations``, ``gear_and_trinket_notes``,
+  ``comparison_to_top_logs``, ``headline`` und jeden Eintrag von
+  ``strengths``. Drei gültige Formen:
+
+      [Mana-Tee](spell:115294)            — Buffs, Casts, Debuffs, Boss-Fähigkeiten
+      [Algari-Manatrank](item:212017)     — Verbrauchsgüter, Trinkets, Ausrüstung
+      [Teezeit](talent:124683)            — Talente aus talent_ids
+
+  ``Label`` ist der lokalisierte Name (nutze ``localized_names`` verbatim
+  — übersetze nichts selbst). ``id`` ist die numerische ID exakt wie sie
+  im jeweiligen Schlüssel von ``localized_names`` / ``talent_ids`` / im
+  ``item_id`` des Gears / im ``ability_id`` des Casts steht. Schreib
+  **keinen** plain Zaubernamen ohne ``[…](spell:…)``-Wrapper, gib
+  **keine** rohen Wowhead-URLs aus, und **erfinde keine** IDs die nicht
+  in den Daten stehen. Wenn du wirklich eine Fähigkeit erwähnen musst,
+  deren ID nicht in den Daten ist, schreib „die Fähigkeit X" als
+  Plaintext — kein Link.
 - Casts, Buff-Uptimes und Ausrüstung des Spielers gegen die mitgelieferten
   Top-Log-Referenzspieler (gleiche Spec, gleicher Boss, gleiche Region,
   gleiche Schwierigkeit) vergleichen. Konkrete Deltas nennen:
@@ -253,10 +348,63 @@ einem Kampf. Der Bericht muss:
       kennzeichne das als kritischen Befund. Ein Tod ist fast immer
       schwerwiegender als ein 5%-DPS-Loss.
 - Nutze ``phase_transitions`` für phasen-bewusste Hinweise wenn der Kampf
-  mehrere Phasen hat („CD-Nutzung am P2-Übergang verpasst").
+  mehrere Phasen hat. Jeder Eintrag hat ``id``, ``start_seconds``
+  (Sekunden ab Fight-Start, direkt mit ``duration_minutes`` × 60
+  vergleichbar) und — wenn WCL sie kennt — ``name`` und ein
+  ``is_intermission``-Flag. Zitiere die Phase über den *Namen* wenn
+  vorhanden („CD-Nutzung am Übergang zur Blutigen Intermission bei 1:42
+  verpasst"), nicht über die rohe ID. Verschwende keine Cooldowns in
+  Intermission-Phasen.
+- **Nutze ``fight.boss_casts`` (und das passende ``detail.boss_casts``
+  jeder Top-Log-Referenz), um defensive Cooldowns des Spielers gegen die
+  tatsächlichen Boss-Druck-Zyklen abzugleichen.** Jeder Eintrag ist eine
+  Boss-Fähigkeit mit ``ability_id``, ``count`` (Gesamt-Casts im Fight)
+  und ``cast_seconds`` (Stichprobe der Cast-Zeitpunkte in Fight-Sekunden).
+  Zyklus-Periode schätzen via ``round((max-min)/(count-1))`` auf
+  ``cast_seconds`` ≈ Sekunden zwischen Treffern. Dann mit der Defensiv-
+  Cast-Zahl aus ``top_casts`` vergleichen:
+    - Boss-Ability mit ~25 s Zyklus auf 6:00 Fight = ~14 erwartete Hits.
+    - 60-s-CD Defensive 3× genutzt → deckt ~5 von 14 ab. Konkrete Lücke.
+    - Wenn die Top-Log-Referenz für dieselbe Ability den gleichen Zyklus
+      zeigt, aber jeden *zweiten* Hit mitigiert (≈ 7 Defensives), das
+      Gap explizit benennen: „Boss castet X ~14×, Top-Log mitigiert
+      jeden zweiten Hit (7 Defensives), du 3× → 4 verpasste
+      Mitigations-Fenster".
+  Zitiere die Boss-Ability über ihren lokalisierten Namen aus
+  ``localized_names`` (unter dem ``spell:<id>``-Key — Boss-Casts sind
+  echte Spells), nie über die rohe ID.
 - Werte ``damage_taken`` aus, um Mechaniken zu flaggen, die der Spieler
   frisst, die Top-Performer aber dodgen. Erfinde keine Boss-Mechaniken —
   beziehe dich nur auf Fähigkeiten, die tatsächlich in den Daten stehen.
+- **Nur für Healer: ``player.mana_recovery`` nutzen, um Mana-Pressure zu
+  bewerten.** WCLs öffentliche API exponiert KEINEN absoluten Mana-Stand
+  und KEINE Cast-Kosten — was du bekommst ist die Timeline der
+  *expliziten Grants* (Mana Tea / Innervate / Tränke / Buff-Recovery):
+    - ``total_recovered_pct``: Summe aller Grants in % vom Max-Mana.
+      Werte über 100% sind auf langen Fights normal.
+    - ``recovery_sources``: Top-Abilities mit ``count``,
+      ``total_pct`` und ``timestamps_seconds`` jedes Grants.
+  So nutzt du das:
+    - Cross-Check gegen erwartete CD-Nutzungen: Mana Tee hat 90s CD →
+      auf 7 Min Fight ~5 Charges. Wenn ``count`` für Mana Tee = 2 ist,
+      wurden 3 Charges verpasst.
+    - Suche *Lücken* in der Vereinigung der ``timestamps_seconds`` aller
+      Sources von ≥90s während der Cast-Rate hoch war — das ist
+      vermutlich ein Mana-Dip, den der Spieler mit einem Trank oder
+      einem zurückgehaltenen CD hätte schließen sollen. Du siehst KEINEN
+      absoluten Mana-Wert, aber das *Muster* der Recovery-Events
+      (häufig + verteilt = sustained; früh geclumped = später leer;
+      spät geclumped = Panik-Recovery) ist diagnostisch.
+    - Wenn ein Healer 400+ Heals in 6 Min macht mit nur 1 Trank und
+      keinem Innervate/Tee spät, war Mana mit großer Wahrscheinlichkeit
+      der Flaschenhals — auch wenn du den exakten % nicht beweisen kannst.
+    - Zitiere Sources über ihren lokalisierten Namen aus
+      ``localized_names`` (``spell:<id>``-Key), nie über die rohe ID.
+      Erfinde KEINE absoluten "% bei Zeitpunkt T"-Zahlen — sag
+      stattdessen „zwischen 2:00 und 4:10 kein Recovery-Event während
+      die Cast-Rate bei ~60/min blieb".
+  Bei Nicht-Heilern ist der Block leer / null. Wenn leer, überspring das
+  Thema komplett — keine Mana-Spekulation für DPS/Tanks.
 - **Ursache statt Symptom.** Wenn ein Buff/Debuff niedrige Uptime hat oder
   ein Proc schwach wirkt, identifiziere den *Cast, der ihn gewährt*, und
   bewerte dessen Cast-Frequenz. Nutze dafür die ``top_casts``-Liste des
