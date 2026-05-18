@@ -16,6 +16,15 @@ highlighted prominently; tone is calibrated to the player's WCL parse %.
   the admin panel (model download with progress bar, cache cleanup,
   start/stop) via a small supervisor sidecar — no `.env` edits or
   container rebuilds for model swaps
+- **DPS simulations:** in-app talent-build comparison via a bundled
+  SimulationCraft sidecar. Paste your `/simc` profile, tick the
+  loadouts you want to compare against any of the built-in fight
+  profiles (raid single-target, raid council, M+ DungeonSlice) or a
+  fully custom profile with quick-start presets. Stale saved loadouts
+  from the in-game SimC Addon are auto-repaired by a local port of
+  simcs talent decoder — the hero-tree gateway that the addon omits
+  is re-injected on the fly, so saved builds run cleanly without the
+  segfault simc otherwise hits
 - **BYOK:** users can plug in their own Anthropic / OpenAI / OpenAI-compatible
   API key in their profile and run analyses against it instead of the
   app-wide provider — keys are stored Fernet-encrypted in Postgres

@@ -174,6 +174,88 @@ async def stop(name_or_service: str, *, timeout: int = 30) -> ContainerInfo:
     return await asyncio.to_thread(_sync)
 
 
+async def pull_and_recreate(name_or_service: str) -> ContainerInfo:
+    """Pull the latest tag for a container's image and recreate it.
+
+    Used by the admin "Update SimC" button: the upstream simc image is
+    rebuilt daily with the latest binary + DBC data, and we want admins
+    to be able to bump to it without SSHing into the host.
+
+    We can't shell out to ``docker compose pull && up -d`` because the
+    backend container doesn't carry the compose CLI; instead we use the
+    Docker SDK directly. The recreate path preserves the things compose
+    cares about for service discovery: same name, same compose labels
+    (``com.docker.compose.*``), same network attachment. Volume mounts,
+    env vars, entrypoint/cmd, and the healthcheck are copied verbatim
+    from the old container so the new one behaves identically.
+    """
+    _ensure_enabled()
+
+    def _sync() -> ContainerInfo:
+        client = _client()
+        c = _find_one_sync(name_or_service)
+        attrs = c.attrs or {}
+        config = attrs.get("Config") or {}
+        host_config = attrs.get("HostConfig") or {}
+        net_settings = attrs.get("NetworkSettings") or {}
+        networks = net_settings.get("Networks") or {}
+        labels = config.get("Labels") or {}
+
+        # Prefer the image tag the container was originally created
+        # with so the ``pull`` actually re-resolves the tag. Pulling
+        # by SHA is always a no-op (the SHA already exists locally).
+        image_ref = config.get("Image") or attrs.get("Image") or ""
+        if not image_ref:
+            raise UpstreamError(f"could not determine image tag for {name_or_service}")
+
+        logger.info("docker pull %s", image_ref)
+        try:
+            client.images.pull(image_ref)
+        except Exception as exc:  # noqa: BLE001
+            raise UpstreamError(f"docker pull {image_ref} failed: {exc}") from exc
+
+        was_running = c.status == "running"
+        if was_running:
+            c.stop(timeout=15)
+        original_name = c.name
+        c.remove(force=True)
+
+        first_network = next(iter(networks), None)
+        new = client.containers.create(
+            image=image_ref,
+            name=original_name,
+            command=config.get("Cmd") or None,
+            entrypoint=config.get("Entrypoint") or None,
+            environment=config.get("Env") or [],
+            labels=labels,
+            detach=True,
+            healthcheck=config.get("Healthcheck") or None,
+            restart_policy=host_config.get("RestartPolicy") or {"Name": "unless-stopped"},
+            network=first_network,
+            volumes=host_config.get("Binds") or None,
+        )
+        # Re-attach any secondary networks the original container was on.
+        # First-network attachment happened above; the rest we connect
+        # explicitly so service-discovery names continue to resolve.
+        for net_name in networks:
+            if net_name == first_network:
+                continue
+            try:
+                client.networks.get(net_name).connect(new)
+            except Exception:  # noqa: BLE001
+                logger.warning(
+                    "Could not reattach %s to network %s after recreate",
+                    original_name,
+                    net_name,
+                )
+        if was_running:
+            new.start()
+        new.reload()
+        return _container_to_info(new)
+
+    return await asyncio.to_thread(_sync)
+
+
 async def ensure_local_ai(target_running: bool) -> ContainerInfo | None:
     """Bring the ``local-ai`` container into the desired state if present.
 

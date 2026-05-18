@@ -56,6 +56,22 @@ class Settings(BaseSettings):
     wcl_redirect_uri: str = "http://localhost:8000/api/v1/auth/wcl/callback"
     wcl_oauth_scope: str = "view-user-profile"
 
+    # --- Battle.net (Blizzard) ---
+    # Authoritative source for any WoW character's public profile data
+    # (talent loadouts incl. hero talents, equipped gear, basic info).
+    # The character profile / specializations / equipment endpoints
+    # are addressable with a plain Client-Credentials token — no per-
+    # user login needed (the same data is rendered on the public
+    # Armory web page). The token is fetched + cached server-side in
+    # :mod:`app.services.blizzard_api`.
+    blizzard_client_id: str = ""
+    blizzard_client_secret: str = ""
+    blizzard_oauth_token_url: str = "https://oauth.battle.net/token"
+    # Profile API host. The REST API is sharded by region; we resolve
+    # to e.g. ``https://eu.api.blizzard.com`` based on the region the
+    # caller picks per request.
+    blizzard_default_region: str = "eu"
+
     # --- AI ---
     # "anthropic" → cloud Claude. "openai" → cloud OpenAI / Azure-OpenAI.
     # "local" → an OpenAI-compatible server you run yourself (vLLM/Ollama/...).
@@ -107,6 +123,30 @@ class Settings(BaseSettings):
     # as ``chat_template_kwargs.enable_thinking`` and silently ignored by
     # models that don't recognise it.
     local_ai_enable_thinking: bool = True
+
+    # --- SimC sidecar ---
+    # Optional companion service that wraps the simulationcraftorg/simc
+    # binary in a thin FastAPI server (compose profile: ``simc``). The
+    # backend posts simulation requests to ``{base}/simulate`` and reads
+    # ``{base}/version`` for the admin "current build" display.
+    simc_base_url: str = "http://simc:8090"
+    # Per-simulation timeout the backend gives the sidecar's HTTP call.
+    # Slightly higher than the sidecar's own ``SIMC_TIMEOUT_S`` so the
+    # subprocess errors out first and we get a proper 4xx/5xx body rather
+    # than a torn connection. Bumped well above ST/Council runs to cover
+    # DungeonSlice on slower hardware.
+    simc_request_timeout_s: int = 2000
+    # Default iterations per sim run when the request doesn't override.
+    # 5000 gives ~2% error on most specs; bump to 10000 for tighter
+    # talent-tree comparisons.
+    simc_default_iterations: int = 5000
+    # Auto-cleanup window. Simulation rows older than this many days are
+    # deleted by the daily cron job (alongside their per-run children
+    # via FK cascade).
+    simc_retention_days: int = 30
+    # Hard cap on talent loadouts per request. Each loadout multiplies
+    # the total sim time linearly, so we keep this small by default.
+    simc_max_loadouts: int = 3
 
     # --- SMTP ---
     smtp_host: str = "smtp.local"

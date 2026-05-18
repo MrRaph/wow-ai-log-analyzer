@@ -463,3 +463,133 @@ export interface TopLogsCurrentTierResponse {
     expansion_name: string;
   }>;
 }
+
+// --- SimulationCraft -------------------------------------------------------
+
+export type SimcRotation = "simc_default" | "blizzard" | "custom";
+export type SimcFightProfile = "single_target" | "council" | "mythic_plus" | "custom";
+export type SimulationStatus = "pending" | "running" | "succeeded" | "failed";
+export type SimcPrecision = "fast" | "medium" | "precise";
+
+export interface SimulationLoadoutIn {
+  name: string;
+  talents: string;
+}
+
+export interface CustomProfileOverrides {
+  fight_style: string;
+  desired_targets: number;
+  max_time: number;
+  target_error: number;
+}
+
+export interface SimulationAbility {
+  name: string;
+  spell_id: number;
+  spell_name: string;
+  school: string;
+  dps: number;
+  pct: number;
+  damage_per_iter: number;
+  executes: number;
+  hits: number;
+  crit_pct: number;
+}
+
+export interface SimulationRunOut {
+  id: string;
+  simulation_id: string;
+  loadout_index: number;
+  loadout_name: string;
+  rotation: SimcRotation;
+  fight_profile_key: SimcFightProfile;
+  status: SimulationStatus;
+  dps_mean: number;
+  dps_min: number;
+  dps_max: number;
+  dps_stddev: number;
+  fight_length_mean: number;
+  abilities: SimulationAbility[];
+  error: string | null;
+  started_at: string | null;
+  finished_at: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface Simulation {
+  id: string;
+  requested_by_id: string | null;
+  label: string;
+  simc_profile: string;
+  loadouts: SimulationLoadoutIn[];
+  fight_profiles: SimcFightProfile[];
+  rotations: SimcRotation[];
+  iterations: number;
+  precision: SimcPrecision;
+  custom_overrides: CustomProfileOverrides | null;
+  status: SimulationStatus;
+  error: string | null;
+  started_at: string | null;
+  finished_at: string | null;
+  simc_build: string | null;
+  created_at: string;
+  updated_at: string;
+  runs: SimulationRunOut[];
+}
+
+export interface SimulationListItem {
+  id: string;
+  label: string;
+  status: SimulationStatus;
+  iterations: number;
+  precision: SimcPrecision;
+  fight_profiles: SimcFightProfile[];
+  rotations: SimcRotation[];
+  loadout_count: number;
+  created_at: string;
+  finished_at: string | null;
+}
+
+export interface PaginatedSimulations {
+  items: SimulationListItem[];
+  total: number;
+  page: number;
+  page_size: number;
+}
+
+export interface SimulationInfo {
+  fight_profiles: Array<{
+    key: SimcFightProfile;
+    fight_style: string;
+    desired_targets: number;
+    max_time: number | null;
+    target_error: number | null;
+    label_en: string;
+    label_de: string;
+  }>;
+  custom_defaults: CustomProfileOverrides;
+  supported_fight_styles: Array<{ key: string; label: string }>;
+  rotations: SimcRotation[];
+  precisions: Array<{ key: "fast" | "medium" | "precise"; iterations: number }>;
+  default_precision: "fast" | "medium" | "precise";
+  default_iterations: number;
+  max_loadouts: number;
+  retention_days: number;
+  simc_build: string;
+  sidecar_reachable: boolean;
+}
+
+export interface SidecarStatus {
+  reachable: boolean;
+  queued: number;
+  running: number;
+  max_concurrent: number;
+}
+
+export interface SimcStatus {
+  reachable: boolean;
+  build_banner: string;
+  base_url: string;
+  container: ContainerStatus | null;
+}

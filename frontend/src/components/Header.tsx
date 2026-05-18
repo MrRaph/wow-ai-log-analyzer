@@ -74,6 +74,9 @@ export function Header({ locale }: { locale: Locale }) {
               <Link href={`/${locale}/analyze`} className="px-2 py-1.5 text-sm text-zinc-200 no-underline hover:text-accent sm:px-3">
                 {t("nav.analyze")}
               </Link>
+              <Link href={`/${locale}/simulate`} className="px-2 py-1.5 text-sm text-zinc-200 no-underline hover:text-accent sm:px-3">
+                {t("nav.simulate")}
+              </Link>
               <Link href={`/${locale}/top-logs`} className="px-2 py-1.5 text-sm text-zinc-200 no-underline hover:text-accent sm:px-3">
                 {t("nav.topLogs")}
               </Link>

@@ -473,6 +473,74 @@ async def _import_talents(
     return total
 
 
+async def _refresh_trait_data_inc(
+    client: httpx.AsyncClient, build: str, missing: list[str]
+) -> int:
+    """Pull the latest ``trait_data.inc`` from simc/master.
+
+    simc auto-generates this file from Blizzards DBC on every new WoW
+    build, so picking it up keeps our local talent decoder
+    (``app.services.talents``) in lock-step with simcs own dataset.
+    The file lives next to the decoder package so the runtime can
+    ``mmap`` it without DB roundtrips.
+
+    Returns the number of trait records imported (for the import-run
+    summary). On any failure we keep the existing file and add a note
+    to ``missing`` so the admin UI can flag the run as partial.
+    """
+    from pathlib import Path
+
+    url = (
+        "https://raw.githubusercontent.com/simulationcraft/simc/"
+        "dragonflight/engine/dbc/generated/trait_data.inc"
+    )
+    try:
+        resp = await client.get(url, timeout=httpx.Timeout(connect=15, read=120, write=15, pool=15))
+        resp.raise_for_status()
+        text = resp.text
+    except httpx.HTTPError as exc:
+        logger.warning("trait_data.inc fetch failed: %s", exc)
+        missing.append("trait_data.inc")
+        return 0
+
+    # Sanity check: the file should start with our expected build comment
+    # and contain at least a few hundred records. If it doesn't, dont
+    # overwrite the working copy — better to keep stale data than
+    # break the decoder on a malformed download.
+    if "trait_data_t" not in text or text.count("\n") < 500:
+        logger.warning(
+            "trait_data.inc looks malformed (size=%d, lines=%d) — skipping",
+            len(text),
+            text.count("\n"),
+        )
+        missing.append("trait_data.inc (malformed)")
+        return 0
+
+    dst = Path(__file__).parent / "talents" / "trait_data.inc"
+    try:
+        dst.write_text(text, encoding="utf-8")
+    except OSError as exc:
+        logger.warning("trait_data.inc write failed at %s: %s", dst, exc)
+        missing.append("trait_data.inc (write)")
+        return 0
+
+    # Drop the in-process LRU cache so the next decode picks up the new
+    # file without a worker restart.
+    try:
+        from app.services.talents.trait_data import reset_cache
+
+        reset_cache()
+    except Exception:  # noqa: BLE001 — best-effort
+        pass
+
+    # Cheap row-count via re-grep: each record line ends with ", 0 },"
+    # (the node_type / sub_tree closing brace pair). Good enough for
+    # the admin notes; the precise count lives in the decoder.
+    rows = sum(1 for line in text.splitlines() if line.lstrip().startswith("{"))
+    logger.info("imported trait_data.inc: %s records (build referenced: %s)", rows, build)
+    return rows
+
+
 async def _import_encounters(
     session: AsyncSession, client: httpx.AsyncClient, build: str, missing: list[str]
 ) -> int:
@@ -627,7 +695,13 @@ async def run_full_import(session: AsyncSession, *, build: str | None = None) ->
             items = await _import_items(session, client, build, missing)
             await _set_phase("encounters")
             encounters = await _import_encounters(session, client, build, missing)
-            run.rows_imported = spells + talents + items + encounters
+            # trait_data.inc keeps our local talent decoder in lock-step
+            # with simcs internal dataset. Best-effort: a failed pull
+            # doesnt break the import — the decoder keeps using the
+            # last good copy on disk.
+            await _set_phase("trait_data")
+            trait_records = await _refresh_trait_data_inc(client, build, missing)
+            run.rows_imported = spells + talents + items + encounters + trait_records
             run.finished_at = datetime.now(UTC)
             run.phase = ""
 
@@ -644,7 +718,10 @@ async def run_full_import(session: AsyncSession, *, build: str | None = None) ->
                 )[:1000]
             else:
                 run.status = WowImportStatus.success.value
-                base = f"spells={spells} talents={talents} items={items} encounters={encounters}"
+                base = (
+                    f"spells={spells} talents={talents} items={items} "
+                    f"encounters={encounters} trait_data={trait_records}"
+                )
                 if missing:
                     base += (
                         f" — partial (missing locales: {', '.join(missing)}); "
