@@ -194,7 +194,10 @@ services:
   # (DBC data + binary) from the admin UI via ADMIN_DOCKER_CONTROL →
   # docker-socket mount on the backend container.
   simc:
-    image: ${SIMC_SIDECAR_IMAGE:-wow-ai-log-analyzer-simc-sidecar:latest}
+    # Image name matches the CI publish target on ghcr.io
+    # (``wow-ai-log-analyzer-simc``). The historical
+    # ``SIMC_SIDECAR_IMAGE`` env var still works as an override.
+    image: ${SIMC_SIDECAR_IMAGE:-wow-ai-log-analyzer-simc:latest}
     build:
       context: ./simc-sidecar
       dockerfile: Dockerfile
