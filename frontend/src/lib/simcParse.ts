@@ -56,7 +56,12 @@ export function parseSimcLoadouts(profile: string): DetectedLoadout[] {
     }
   }
 
-  // 2) Saved loadout blocks.
+  // 2) Saved loadout blocks. We DO NOT drop duplicates by code anymore —
+  //    users often save the same build under multiple names ("Raid ST",
+  //    "Raid Imp", "Raid Dragons" with identical talent codes), and
+  //    silently hiding them confuses the picker. Instead, when we see
+  //    a code we already have, we *merge* the names so the entry shows
+  //    up once with "Raid ST / Raid Imp / Raid Dragons".
   _SAVED_RE.lastIndex = 0;
   let m: RegExpExecArray | null;
   while ((m = _SAVED_RE.exec(profile)) !== null) {
@@ -66,13 +71,16 @@ export function parseSimcLoadouts(profile: string): DetectedLoadout[] {
     const name = rawName.trim();
     const line = `talents=${rawTalents.trim()}`;
     if (seen.has(line)) {
-      // The user has the active talents also saved under a name; keep
-      // the active row but upgrade its name to the saved-loadout label
-      // so the UI shows "Riders ST / Raid (active)" instead of plain
-      // "Active".
       const existing = out.find((l) => l.talents === line);
-      if (existing && existing.isActive && existing.name === "Active") {
+      if (!existing) continue;
+      if (existing.isActive && existing.name === "Active") {
+        // First saved name we see for the active build — replace the
+        // generic "Active" label so the row reads e.g. "Raid ST".
         existing.name = name;
+      } else if (!existing.name.split(" / ").includes(name)) {
+        // Another saved loadout with the same code under a different
+        // name — append it so the picker shows all aliases.
+        existing.name = `${existing.name} / ${name}`;
       }
       continue;
     }

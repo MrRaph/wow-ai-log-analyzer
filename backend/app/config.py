@@ -56,6 +56,22 @@ class Settings(BaseSettings):
     wcl_redirect_uri: str = "http://localhost:8000/api/v1/auth/wcl/callback"
     wcl_oauth_scope: str = "view-user-profile"
 
+    # --- Battle.net (Blizzard) ---
+    # Authoritative source for any WoW character's public profile data
+    # (talent loadouts incl. hero talents, equipped gear, basic info).
+    # The character profile / specializations / equipment endpoints
+    # are addressable with a plain Client-Credentials token — no per-
+    # user login needed (the same data is rendered on the public
+    # Armory web page). The token is fetched + cached server-side in
+    # :mod:`app.services.blizzard_api`.
+    blizzard_client_id: str = ""
+    blizzard_client_secret: str = ""
+    blizzard_oauth_token_url: str = "https://oauth.battle.net/token"
+    # Profile API host. The REST API is sharded by region; we resolve
+    # to e.g. ``https://eu.api.blizzard.com`` based on the region the
+    # caller picks per request.
+    blizzard_default_region: str = "eu"
+
     # --- AI ---
     # "anthropic" → cloud Claude. "openai" → cloud OpenAI / Azure-OpenAI.
     # "local" → an OpenAI-compatible server you run yourself (vLLM/Ollama/...).

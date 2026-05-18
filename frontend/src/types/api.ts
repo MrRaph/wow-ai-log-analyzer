@@ -467,13 +467,20 @@ export interface TopLogsCurrentTierResponse {
 // --- SimulationCraft -------------------------------------------------------
 
 export type SimcRotation = "simc_default" | "blizzard" | "custom";
-export type SimcFightProfile = "single_target" | "council" | "mythic_plus";
+export type SimcFightProfile = "single_target" | "council" | "mythic_plus" | "custom";
 export type SimulationStatus = "pending" | "running" | "succeeded" | "failed";
 export type SimcPrecision = "fast" | "medium" | "precise";
 
 export interface SimulationLoadoutIn {
   name: string;
   talents: string;
+}
+
+export interface CustomProfileOverrides {
+  fight_style: string;
+  desired_targets: number;
+  max_time: number;
+  target_error: number;
 }
 
 export interface SimulationAbility {
@@ -520,6 +527,7 @@ export interface Simulation {
   rotations: SimcRotation[];
   iterations: number;
   precision: SimcPrecision;
+  custom_overrides: CustomProfileOverrides | null;
   status: SimulationStatus;
   error: string | null;
   started_at: string | null;
@@ -555,9 +563,13 @@ export interface SimulationInfo {
     key: SimcFightProfile;
     fight_style: string;
     desired_targets: number;
+    max_time: number | null;
+    target_error: number | null;
     label_en: string;
     label_de: string;
   }>;
+  custom_defaults: CustomProfileOverrides;
+  supported_fight_styles: Array<{ key: string; label: string }>;
   rotations: SimcRotation[];
   precisions: Array<{ key: "fast" | "medium" | "precise"; iterations: number }>;
   default_precision: "fast" | "medium" | "precise";

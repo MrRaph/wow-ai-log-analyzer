@@ -107,6 +107,10 @@ class Simulation(Base, TimestampMixin):
     # SimC build the sidecar reported when the simulation kicked off.
     # Persisted so the UI can flag stale runs after an upstream update.
     simc_build: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    # Per-request overrides for the ``custom`` fight profile (fight
+    # style / desired_targets / max_time / target_error). NULL for any
+    # request that doesn't include the synthetic ``custom`` profile.
+    custom_overrides: Mapped[dict | None] = mapped_column(JSONType, nullable=True)
 
     runs: Mapped[list["SimulationRun"]] = relationship(
         "SimulationRun",

@@ -37,16 +37,28 @@ logger = logging.getLogger(__name__)
 
 # Maps the user-facing fight-profile keys to simc engine flags. Keep
 # this in sync with the frontend's profile picker.
+#
+# ``max_time``: encounter length in seconds. Raid bosses average ~90s
+# per phase (raidbots default), M+ bosses ~5-6 min so DungeonSlice
+# runs longer.
+# ``target_error``: smart-sim cutoff — simc keeps iterating until the
+# DPS confidence interval drops below this percentage. Raidbots uses
+# 0.05 (= 0.05% margin) for its "Tight" precision tier; we mirror that
+# so our numbers are directly comparable.
 FIGHT_PROFILES: dict[str, dict[str, Any]] = {
     "single_target": {
         "fight_style": "Patchwerk",
         "desired_targets": 1,
+        "max_time": 90,
+        "target_error": 0.05,
         "label_en": "Raid — Single Target",
         "label_de": "Raid — Single Target",
     },
     "council": {
         "fight_style": "Patchwerk",
         "desired_targets": 3,
+        "max_time": 90,
+        "target_error": 0.05,
         "label_en": "Raid — Council (3 bosses)",
         "label_de": "Raid — Council (3 Bosse)",
     },
@@ -55,12 +67,41 @@ FIGHT_PROFILES: dict[str, dict[str, Any]] = {
         # trash + add waves with realistic timing). It's simc's canonical
         # M+ profile and what the community sims against for talent
         # comparisons.
+        #
+        # M+ encounters last roughly 5-7 min. 360s is what raidbots uses
+        # for its DungeonSlice preset — long enough to cover a full key
+        # chunk including a boss + add waves, short enough to keep the
+        # smart-sim under ~30s on our hardware.
         "fight_style": "DungeonSlice",
         "desired_targets": 1,  # DungeonSlice spawns its own waves
+        "max_time": 360,
+        "target_error": 0.05,
         "label_en": "Mythic+ pulls (DungeonSlice)",
         "label_de": "Mythic+ Pulls (DungeonSlice)",
     },
 }
+
+
+# Per-profile defaults exposed to the frontend's "Custom" tab so the
+# user can start from a known-good baseline and tweak from there.
+CUSTOM_PROFILE_DEFAULTS: dict[str, Any] = {
+    "fight_style": "Patchwerk",
+    "desired_targets": 1,
+    "max_time": 300,
+    "target_error": 0.05,
+}
+
+# Fight styles simc accepts. Surfaced to the frontend for the Custom
+# dropdown — keep the user-facing labels short and stable.
+SUPPORTED_FIGHT_STYLES: list[dict[str, str]] = [
+    {"key": "Patchwerk",     "label": "Patchwerk (Boss tank-and-spank)"},
+    {"key": "DungeonSlice",  "label": "DungeonSlice (Mythic+ key)"},
+    {"key": "CastingPatchwerk", "label": "Casting Patchwerk (caster-friendly)"},
+    {"key": "HelterSkelter", "label": "Helter Skelter (heavy movement)"},
+    {"key": "Ultraxion",     "label": "Ultraxion (stationary, no movement)"},
+    {"key": "LightMovement", "label": "Light Movement"},
+    {"key": "HeavyMovement", "label": "Heavy Movement"},
+]
 
 
 # Lines in a /simc profile that represent talent loadouts. We strip
@@ -150,6 +191,7 @@ async def run_simulation(
     rotation: str,
     threads: int | None = None,
     target_error: float | None = None,
+    custom_overrides: dict[str, Any] | None = None,
     poll_interval_s: float = 2.0,
 ) -> dict[str, Any]:
     """Submit a simulation to the sidecar and poll for the result.
@@ -165,9 +207,18 @@ async def run_simulation(
     timeout maps to ``UpstreamError`` after best-effort cancellation
     so the sidecar can free its slot.
     """
-    if fight_profile_key not in FIGHT_PROFILES:
+    # ``custom`` is a synthetic profile-key driven entirely by the
+    # frontend's Custom tab — the override dict carries every flag.
+    if fight_profile_key == "custom":
+        if not custom_overrides:
+            raise ValidationAppError(
+                "Custom fight profile selected but no overrides given."
+            )
+        fp = {**CUSTOM_PROFILE_DEFAULTS, **custom_overrides}
+    elif fight_profile_key not in FIGHT_PROFILES:
         raise ValidationAppError(f"unknown fight profile {fight_profile_key!r}")
-    fp = FIGHT_PROFILES[fight_profile_key]
+    else:
+        fp = FIGHT_PROFILES[fight_profile_key]
     payload: dict[str, Any] = {
         "profile": profile,
         "fight_style": fp["fight_style"],
@@ -175,11 +226,19 @@ async def run_simulation(
         "iterations": iterations,
         "rotation": rotation,
         "assume_raid_prep": True,
+        # Per-profile sim shape: encounter length + smart-sim cutoff.
+        # Raidbots uses 90s for raid bosses, 360s for M+ DungeonSlice,
+        # and a 0.05% target_error baseline ("Tight" precision).
+        "max_time": fp.get("max_time"),
     }
     if threads is not None:
         payload["threads"] = threads
+    # Profile-supplied target_error wins over the caller's override only
+    # when the caller didn't ask for a specific value.
     if target_error is not None:
         payload["target_error"] = target_error
+    elif fp.get("target_error") is not None:
+        payload["target_error"] = fp["target_error"]
 
     # ---- 1) submit ---------------------------------------------------------
     try:

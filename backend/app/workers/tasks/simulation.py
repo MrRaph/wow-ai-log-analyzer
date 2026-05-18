@@ -37,6 +37,7 @@ from app.models import (
     SimulationStatus,
 )
 from app.services import simc_service
+from app.services.blizzard_talent_refresh import refresh_loadout_talents
 
 logger = logging.getLogger(__name__)
 
@@ -115,6 +116,7 @@ async def _execute_run(
     rotation: str,
     fight_profile_key: str,
     iterations: int,
+    custom_overrides: dict[str, Any] | None = None,
 ) -> bool:
     """Run one (loadout × fight profile) combination. Returns True if
     the run completed successfully, False otherwise. Errors are
@@ -136,6 +138,7 @@ async def _execute_run(
             fight_profile_key=fight_profile_key,
             iterations=iterations,
             rotation=rotation,
+            custom_overrides=custom_overrides,
         )
     except Exception as exc:  # noqa: BLE001
         logger.warning("simc run %s failed: %s", run_id, exc)
@@ -187,6 +190,7 @@ async def run_simulation_task(_ctx: dict, simulation_id: str) -> None:
             base_profile = parent.simc_profile
             iterations = parent.iterations or settings.simc_default_iterations
             loadouts: list[dict[str, Any]] = list(parent.loadouts or [])
+            custom_overrides = parent.custom_overrides
 
             runs = (
                 await session.execute(
@@ -214,6 +218,17 @@ async def run_simulation_task(_ctx: dict, simulation_id: str) -> None:
         # Non-fatal: log and proceed.
         logger.warning("simc /version probe failed for %s", sim_id, exc_info=True)
 
+    # ---- Refresh stale talent codes against Battle.net ----
+    # The SimC Addon serialises saved loadouts from a stale snapshot
+    # that's missing hero talents, so trusting the addon's strings
+    # makes simc crash on "Invalid Hero Talent tree". We swap each
+    # loadout's talent code for the live one from Blizzard's Profile
+    # API (matched by longest common prefix). Best-effort: on any
+    # failure we fall back to the user's input.
+    loadouts = await refresh_loadout_talents(
+        simc_profile=base_profile, loadouts=loadouts
+    )
+
     # ---- Execute children one at a time ----
     try:
         succeeded_any = False
@@ -229,6 +244,7 @@ async def run_simulation_task(_ctx: dict, simulation_id: str) -> None:
                 rotation=plan["rotation"],
                 fight_profile_key=plan["fight_profile_key"],
                 iterations=iterations,
+                custom_overrides=custom_overrides,
             )
             succeeded_any = succeeded_any or ok
 

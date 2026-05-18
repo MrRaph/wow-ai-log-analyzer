@@ -14,6 +14,7 @@ import { formatDateTime, formatNumber } from "@/lib/format";
 import { parseSimcLoadouts, type DetectedLoadout } from "@/lib/simcParse";
 import { spellUrl } from "@/lib/wowhead";
 import type {
+  CustomProfileOverrides,
   PaginatedSimulations,
   SidecarStatus,
   SimcFightProfile,
@@ -23,7 +24,12 @@ import type {
   SimulationRunOut,
 } from "@/types/api";
 
-const FIGHT_PROFILES: SimcFightProfile[] = ["single_target", "council", "mythic_plus"];
+const FIGHT_PROFILES: SimcFightProfile[] = [
+  "single_target",
+  "council",
+  "mythic_plus",
+  "custom",
+];
 const ROTATIONS: SimcRotation[] = ["simc_default", "blizzard", "custom"];
 const PRECISIONS = ["fast", "medium", "precise"] as const;
 type Precision = (typeof PRECISIONS)[number];
@@ -60,6 +66,31 @@ function SimulateView({ locale }: { locale: Locale }) {
   const [precision, setPrecision] = useState<Precision>("precise");
   const [activeSimulationId, setActiveSimulationId] = useState<string | null>(null);
   const [err, setErr] = useState<string | null>(null);
+  // Custom-profile overrides. Populated from /info on first load so the
+  // modal opens with sensible defaults; the user can tweak and the
+  // values ride along on the next POST /simulations call.
+  const [customOverrides, setCustomOverrides] = useState<CustomProfileOverrides>({
+    fight_style: "Patchwerk",
+    desired_targets: 1,
+    max_time: 300,
+    target_error: 0.05,
+  });
+  const [customModalOpen, setCustomModalOpen] = useState(false);
+
+  // Seed customOverrides from server defaults the first time /info lands.
+  useEffect(() => {
+    if (infoQ.data?.custom_defaults) {
+      setCustomOverrides((prev) =>
+        // Preserve any user-typed value; only fill blanks on first load.
+        prev.fight_style === "Patchwerk" &&
+        prev.max_time === 300 &&
+        prev.target_error === 0.05 &&
+        prev.desired_targets === 1
+          ? { ...infoQ.data!.custom_defaults }
+          : prev,
+      );
+    }
+  }, [infoQ.data?.custom_defaults]);
 
   const maxLoadouts = infoQ.data?.max_loadouts ?? 3;
 
@@ -134,6 +165,11 @@ function SimulateView({ locale }: { locale: Locale }) {
             talents: l.talents,
           })),
           precision,
+          // Only send the override block when the user actually picked
+          // the "custom" profile — otherwise the backend rejects it.
+          custom_overrides: selectedFights.includes("custom")
+            ? customOverrides
+            : undefined,
         },
       }),
     onSuccess: (sim) => {
@@ -256,13 +292,25 @@ function SimulateView({ locale }: { locale: Locale }) {
           <div className="flex flex-wrap gap-2">
             {FIGHT_PROFILES.map((fp) => {
               const meta = infoQ.data?.fight_profiles.find((p) => p.key === fp);
-              const labelText = locale === "de" ? meta?.label_de : meta?.label_en;
+              const labelText =
+                fp === "custom"
+                  ? t("simulate.fightProfile.custom")
+                  : locale === "de"
+                    ? meta?.label_de
+                    : meta?.label_en;
               const active = selectedFights.includes(fp);
               return (
                 <button
                   key={fp}
                   type="button"
-                  onClick={() => toggleFight(fp)}
+                  onClick={() => {
+                    toggleFight(fp);
+                    // Opening the modal on the same click is a UX nicety:
+                    // when the user enables "Custom" they almost always
+                    // want to tweak something immediately, so we surface
+                    // the tweak panel without forcing a second click.
+                    if (fp === "custom" && !active) setCustomModalOpen(true);
+                  }}
                   className={`rounded-md border px-3 py-2 text-xs ${
                     active
                       ? "border-accent bg-accent/10 text-accent"
@@ -272,6 +320,29 @@ function SimulateView({ locale }: { locale: Locale }) {
                   <span className="font-medium">
                     {labelText || t(`simulate.fightProfile.${fp}`)}
                   </span>
+                  {fp === "custom" && active && (
+                    <span
+                      role="button"
+                      tabIndex={0}
+                      onClick={(ev) => {
+                        ev.stopPropagation();
+                        setCustomModalOpen(true);
+                      }}
+                      onKeyDown={(ev) => {
+                        if (ev.key === "Enter" || ev.key === " ") {
+                          ev.stopPropagation();
+                          setCustomModalOpen(true);
+                        }
+                      }}
+                      className="ml-2 inline-flex items-center rounded border border-accent/40 bg-accent/10 px-1.5 py-0.5 text-[10px] uppercase tracking-wide hover:border-accent"
+                    >
+                      {customOverrides.fight_style}
+                      {customOverrides.desired_targets > 1
+                        ? ` · ${customOverrides.desired_targets}T`
+                        : ""}
+                      {` · ${customOverrides.max_time}s`}
+                    </span>
+                  )}
                 </button>
               );
             })}
@@ -387,6 +458,15 @@ function SimulateView({ locale }: { locale: Locale }) {
             </div>
           )}
         </div>
+
+        {customModalOpen && (
+          <CustomProfileModal
+            value={customOverrides}
+            fightStyles={infoQ.data?.supported_fight_styles ?? []}
+            onChange={setCustomOverrides}
+            onClose={() => setCustomModalOpen(false)}
+          />
+        )}
 
         <FieldError>{err}</FieldError>
         <div className="flex flex-wrap items-center gap-4">
@@ -949,6 +1029,230 @@ function RunBreakdown({
     </details>
   );
 }
+
+// ---------------------------------------------------------------------------
+// Custom-profile tweak modal
+// ---------------------------------------------------------------------------
+
+// Quick-start presets that match what we tell users in the help text.
+// Picking one replaces every knob at once; the user can still tweak
+// afterwards without losing the chosen baseline.
+const CUSTOM_PRESETS: ReadonlyArray<{
+  key: string;
+  values: CustomProfileOverrides;
+}> = [
+  // Single-target raid boss: long sustained fight, 1 target. 240s
+  // matches the average heroic-boss kill duration better than the
+  // raidbots 90s default and gives 3+ Big-CD usages.
+  { key: "raidBoss",     values: { fight_style: "Patchwerk",    desired_targets: 1,  max_time: 240, target_error: 0.05 } },
+  // Raid council fight (3 bosses, all stay up). 180s is typical for
+  // a heroic council where you cleave all three down together.
+  { key: "raidCouncil",  values: { fight_style: "Patchwerk",    desired_targets: 3,  max_time: 180, target_error: 0.05 } },
+  // M+ trash pull: ~6 mobs, ~60s. Tuned to whats common at +12 / +13
+  // in a moderate-density pack (not the absolute biggest pull).
+  { key: "mplusTrash",   values: { fight_style: "Patchwerk",    desired_targets: 6,  max_time: 60,  target_error: 0.05 } },
+  // M+ boss: single target ~3 min — dungeon bosses live longer than
+  // raid bosses because the group has fewer DPS members.
+  { key: "mplusBoss",    values: { fight_style: "Patchwerk",    desired_targets: 1,  max_time: 180, target_error: 0.05 } },
+  // Full M+ key chunk: DungeonSlice's built-in wave sequence
+  // (boss + add waves), runs ~5-7 min. desired_targets is ignored.
+  { key: "dungeonSlice", values: { fight_style: "DungeonSlice", desired_targets: 1,  max_time: 360, target_error: 0.05 } },
+  // AoE burst test: many targets, very short. Useful for "did my
+  // opener melt the pack" comparisons. 12s ~= one Bloodlust window.
+  { key: "aoeBurst",     values: { fight_style: "Patchwerk",    desired_targets: 10, max_time: 12,  target_error: 0.05 } },
+];
+
+
+function CustomProfileModal({
+  value,
+  fightStyles,
+  onChange,
+  onClose,
+}: {
+  value: CustomProfileOverrides;
+  fightStyles: Array<{ key: string; label: string }>;
+  onChange: (next: CustomProfileOverrides) => void;
+  onClose: () => void;
+}) {
+  const t = useTranslations();
+  // Local draft so the user can cancel without losing the prior state —
+  // we only commit on the "Apply" click.
+  const [draft, setDraft] = useState<CustomProfileOverrides>(value);
+
+  function set<K extends keyof CustomProfileOverrides>(
+    key: K,
+    next: CustomProfileOverrides[K],
+  ) {
+    setDraft((prev) => ({ ...prev, [key]: next }));
+  }
+
+  const isDungeonSlice = draft.fight_style.toLowerCase() === "dungeonslice";
+
+  return (
+    <div
+      className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4"
+      role="dialog"
+      aria-modal="true"
+      onClick={onClose}
+    >
+      <div
+        className="w-full max-w-lg rounded-lg border border-bg-3 bg-bg-1 p-5 shadow-2xl max-h-[90vh] overflow-y-auto"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <h3 className="mb-1 font-display text-lg font-semibold">
+          {t("simulate.customModal.title")}
+        </h3>
+        <p className="mb-4 text-xs text-zinc-500">
+          {t("simulate.customModal.intro")}
+        </p>
+
+        {/* Quick presets — one click sets every knob to a sensible value
+            for the named scenario. */}
+        <div className="mb-4">
+          <Label>{t("simulate.customModal.presetsLabel")}</Label>
+          <div className="flex flex-wrap gap-1.5">
+            {CUSTOM_PRESETS.map((p) => {
+              const isActive =
+                draft.fight_style === p.values.fight_style &&
+                draft.desired_targets === p.values.desired_targets &&
+                draft.max_time === p.values.max_time &&
+                Math.abs(draft.target_error - p.values.target_error) < 0.0001;
+              return (
+                <button
+                  key={p.key}
+                  type="button"
+                  onClick={() => setDraft(p.values)}
+                  className={`rounded border px-2 py-1 text-[11px] ${
+                    isActive
+                      ? "border-accent bg-accent/10 text-accent"
+                      : "border-bg-3 bg-bg-2 text-zinc-300 hover:border-zinc-500"
+                  }`}
+                >
+                  {t(`simulate.customModal.preset.${p.key}`)}
+                </button>
+              );
+            })}
+          </div>
+        </div>
+
+        <div className="space-y-4">
+          <div>
+            <Label htmlFor="cf-style">{t("simulate.customModal.fightStyle")}</Label>
+            <select
+              id="cf-style"
+              value={draft.fight_style}
+              onChange={(e) => set("fight_style", e.target.value)}
+              className="w-full rounded-md border border-bg-3 bg-bg-2 px-3 py-2 text-sm text-zinc-100 focus:border-accent focus:outline-none focus:ring-2 focus:ring-accent/50"
+            >
+              {fightStyles.length === 0 ? (
+                <option value={draft.fight_style}>{draft.fight_style}</option>
+              ) : (
+                fightStyles.map((fs) => (
+                  <option key={fs.key} value={fs.key}>
+                    {fs.label}
+                  </option>
+                ))
+              )}
+            </select>
+            <p className="mt-1 text-xs text-zinc-500">
+              {t("simulate.customModal.fightStyleHint")}
+            </p>
+            {isDungeonSlice && (
+              <div className="mt-2 rounded-md border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-xs text-amber-200/90">
+                <strong className="font-medium">
+                  {t("simulate.customModal.dungeonSliceNoteTitle")}
+                </strong>{" "}
+                {t("simulate.customModal.dungeonSliceNote")}
+              </div>
+            )}
+          </div>
+
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <Label htmlFor="cf-targets">
+                {t("simulate.customModal.desiredTargets")}
+              </Label>
+              <Input
+                id="cf-targets"
+                type="number"
+                min={1}
+                max={20}
+                value={draft.desired_targets}
+                disabled={isDungeonSlice}
+                onChange={(e) =>
+                  set("desired_targets", Math.max(1, Number(e.target.value) || 1))
+                }
+                className={isDungeonSlice ? "opacity-50" : undefined}
+              />
+              <p className="mt-1 text-xs text-zinc-500">
+                {isDungeonSlice
+                  ? t("simulate.customModal.desiredTargetsDisabledHint")
+                  : t("simulate.customModal.desiredTargetsHint")}
+              </p>
+            </div>
+            <div>
+              <Label htmlFor="cf-time">
+                {t("simulate.customModal.maxTime")}
+              </Label>
+              <Input
+                id="cf-time"
+                type="number"
+                min={10}
+                max={3600}
+                step={10}
+                value={draft.max_time}
+                onChange={(e) =>
+                  set("max_time", Math.max(10, Number(e.target.value) || 90))
+                }
+              />
+              <p className="mt-1 text-xs text-zinc-500">
+                {t("simulate.customModal.maxTimeHint")}
+              </p>
+            </div>
+          </div>
+
+          <div>
+            <Label htmlFor="cf-error">
+              {t("simulate.customModal.targetError")}
+            </Label>
+            <Input
+              id="cf-error"
+              type="number"
+              min={0.01}
+              max={5}
+              step={0.01}
+              value={draft.target_error}
+              onChange={(e) =>
+                set(
+                  "target_error",
+                  Math.max(0.01, Number(e.target.value) || 0.05),
+                )
+              }
+            />
+            <p className="mt-1 text-xs text-zinc-500">
+              {t("simulate.customModal.targetErrorHint")}
+            </p>
+          </div>
+        </div>
+
+        <div className="mt-6 flex justify-end gap-2">
+          <Button variant="ghost" onClick={onClose}>
+            {t("common.cancel")}
+          </Button>
+          <Button
+            onClick={() => {
+              onChange(draft);
+              onClose();
+            }}
+          >
+            {t("simulate.customModal.apply")}
+          </Button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 
 function runHeader(
   run: SimulationRunOut,

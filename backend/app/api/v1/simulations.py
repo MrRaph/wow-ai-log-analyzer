@@ -82,11 +82,16 @@ async def simulation_info() -> dict:
                 "key": key,
                 "fight_style": meta["fight_style"],
                 "desired_targets": meta["desired_targets"],
+                "max_time": meta.get("max_time"),
+                "target_error": meta.get("target_error"),
                 "label_en": meta["label_en"],
                 "label_de": meta["label_de"],
             }
             for key, meta in simc_service.FIGHT_PROFILES.items()
         ],
+        # Custom-tab seed values + the picker list of simc fight styles.
+        "custom_defaults": simc_service.CUSTOM_PROFILE_DEFAULTS,
+        "supported_fight_styles": simc_service.SUPPORTED_FIGHT_STYLES,
         "rotations": ["simc_default", "blizzard", "custom"],
         "precisions": [
             {"key": key, "iterations": value}
@@ -141,6 +146,13 @@ async def create_simulation(
     if not rotations:
         raise ValidationAppError("At least one rotation must be selected.")
 
+    # ``custom`` fight profile requires the override block; reject early
+    # rather than 500 deep inside the worker.
+    if "custom" in payload.fight_profiles and payload.custom_overrides is None:
+        raise ValidationAppError(
+            "Custom fight profile selected but no custom_overrides provided."
+        )
+
     parent = Simulation(
         requested_by_id=user.id,
         label=payload.label or "",
@@ -151,6 +163,11 @@ async def create_simulation(
         iterations=iterations,
         precision=payload.precision,
         status=SimulationStatus.pending,
+        custom_overrides=(
+            payload.custom_overrides.model_dump()
+            if payload.custom_overrides is not None
+            else None
+        ),
     )
     session.add(parent)
     await session.flush()  # need parent.id for the children

@@ -104,23 +104,42 @@ DEFAULT_CONSUMABLES: dict[str, str] = {
     # warnings. We let the /simc paste provide it (or omit it).
 }
 
-# Sim flags for "assume full raid prep" — only applied to raid-shaped
-# fight styles (Patchwerk, Ultraxion, …). ``optimal_raid=1`` flips on
-# every standard raid buff/debuff and ``override.bloodlust=1`` makes
-# sure Heroism/Bloodlust is up for the whole fight (raid bosses
-# practically always get one).
+# Buffs raidbots explicitly forces on for every sim (regardless of the
+# UI's "optimal_raid" toggle). Each ``override.X=1`` makes simc model
+# the assumption that the corresponding party member is around to
+# provide the buff. Together they reproduce raidbots' "raid-prepped
+# party of five" baseline — matching their published DPS numbers.
 #
-# For DungeonSlice we deliberately DON'T apply these: simc's tuned M+
-# profile already models a 5-player group with the right buff coverage
-# and a single Bloodlust at pull start. Forcing optimal_raid + a
-# permanent BL on top of that overstates Mythic+ DPS by a chunk.
-RAID_PREP_GLOBAL_FLAGS = (
-    "optimal_raid=1",
+# We apply the full set to BOTH raid and DungeonSlice fight styles,
+# because a real M+ run also has a full 5-man with these buffs. The
+# previous "skip for DungeonSlice" rule was a workaround for an old
+# simc-side double-application bug that no longer applies.
+RAID_PREP_OVERRIDES: tuple[str, ...] = (
     "override.bloodlust=1",
+    "override.arcane_intellect=1",
+    "override.power_word_fortitude=1",
+    "override.battle_shout=1",
+    "override.mystic_touch=1",
+    "override.chaos_brand=1",
+    "override.skyfury=1",
+    "override.mark_of_the_wild=1",
+    "override.hunters_mark=1",
+    "override.bleeding=1",
 )
 
-# Fight styles that we treat as "raid encounter" (full raid prep).
-# DungeonSlice is intentionally absent — see the comment above.
+# Performance / output flags raidbots sets on every sim. ``optimize_
+# expressions=1`` lets simc pre-compute APL conditionals once instead
+# of every iteration. ``single_actor_batch=1`` is required when sim'ing
+# multiple profilesets in one run; harmless for single-actor sims.
+PERFORMANCE_FLAGS: tuple[str, ...] = (
+    "optimize_expressions=1",
+    "single_actor_batch=1",
+)
+
+# Fight styles for which we still set ``optimal_raid=1`` (raid bosses
+# get the additional environment buffs from optimal_raid that aren't
+# covered by the override list above). DungeonSlice manages its own
+# party composition.
 _RAID_PREP_FIGHT_STYLES = {"patchwerk", "ultraxion", "lightmovement"}
 
 JobStatus = Literal["queued", "running", "succeeded", "failed", "cancelled"]
@@ -157,17 +176,28 @@ class SimulateRequest(BaseModel):
     profile: str = Field(..., description="Full SimC profile text (.simc input).")
     fight_style: str = Field("Patchwerk", description="simc fight_style flag.")
     desired_targets: int = Field(1, ge=1, le=20)
-    iterations: int = Field(5000, ge=100, le=50000)
+    iterations: int = Field(5000, ge=100, le=100000)
     target_error: float | None = Field(None, ge=0.0, le=5.0)
+    max_time: int | None = Field(
+        None,
+        ge=10,
+        le=3600,
+        description=(
+            "Encounter length in seconds. Raid bosses ~90s, M+ "
+            "DungeonSlice ~360s. Omitted = simc's per-profile default."
+        ),
+    )
     threads: int | None = Field(None, ge=1, le=256)
     rotation: str = Field(
         "simc_default",
         pattern="^(simc_default|blizzard|custom)$",
         description=(
-            "simc_default = community APL (default when profile has no "
-            "actions= lines), blizzard = Blizzard in-game single-button "
-            "assist via use_blizzard_action_list=1, custom = use whatever "
-            "actions= lines the profile already contains."
+            "simc_default = community APL (used when the profile has no "
+            "actions= lines), blizzard = full Assisted Combat one-button "
+            "macro (use_blizzard_action_list=1 + "
+            "use_cds_with_blizzard_action_list=1 + one_button_mode=1, "
+            "i.e. with the in-game 25 percent GCD penalty), custom = keep "
+            "whatever actions= block the profile already contains."
         ),
     )
     assume_raid_prep: bool = Field(
@@ -562,8 +592,29 @@ def _build_args_and_profile(
     profile_text = req.profile
     extra_args: list[str] = []
     if req.rotation == "blizzard":
+        # "Blizzard" = the in-game Assisted Combat one-button macro. simc
+        # offers three flags that together model what the macro does:
+        #
+        #   use_blizzard_action_list=1        — drive the APL from simc's
+        #                                       baked-in Assisted Combat
+        #                                       step table (the same one
+        #                                       Blizzard ships in-game).
+        #   use_cds_with_blizzard_action_list=1 — let the macro fire
+        #                                       cooldowns (otherwise the
+        #                                       sim never uses Bloodfury,
+        #                                       trinkets, racials, etc.).
+        #   one_button_mode=1                 — apply the 25% GCD penalty
+        #                                       Blizzard adds to the
+        #                                       macro (vs. the no-penalty
+        #                                       "spell highlight" mode).
+        #
+        # All three together = the realistic one-button DPS the player
+        # would see if they actually bound /click ExtraActionButton1 and
+        # let the game pilot them.
         profile_text = _strip_action_lines(profile_text)
         extra_args.append("use_blizzard_action_list=1")
+        extra_args.append("use_cds_with_blizzard_action_list=1")
+        extra_args.append("one_button_mode=1")
     elif req.rotation == "simc_default":
         profile_text = _strip_action_lines(profile_text)
     # custom → leave the profile alone
@@ -571,8 +622,12 @@ def _build_args_and_profile(
     fight_style_lc = req.fight_style.lower()
     if req.assume_raid_prep:
         profile_text = _inject_consumable_defaults(profile_text)
+        # Full raidbots-style buff stack applied to every sim. Mirrors
+        # what raidbots emits on /sims for sane out-of-the-box numbers.
+        extra_args.extend(RAID_PREP_OVERRIDES)
+        extra_args.extend(PERFORMANCE_FLAGS)
         if fight_style_lc in _RAID_PREP_FIGHT_STYLES:
-            extra_args.extend(RAID_PREP_GLOBAL_FLAGS)
+            extra_args.append("optimal_raid=1")
 
     if inject_dungeon_slice and fight_style_lc == "dungeonslice":
         profile_text = _inject_dungeon_slice_flag(profile_text)
@@ -655,6 +710,12 @@ async def _run_simc_once(
             args.append(f"desired_targets={req.desired_targets}")
         if req.target_error is not None:
             args.append(f"target_error={req.target_error}")
+        if req.max_time is not None:
+            # Vary length around the requested duration just like simcs
+            # default does, so the result represents a "fight that lasts
+            # roughly this long" rather than always-exactly-N-seconds.
+            args.append(f"max_time={req.max_time}")
+            args.append("vary_combat_length=0.20")
         threads = req.threads if req.threads is not None else DEFAULT_THREADS
         if threads:
             args.append(f"threads={threads}")
@@ -791,29 +852,25 @@ async def _run_simc(req: SimulateRequest) -> dict[str, Any]:
         suffix = f" (crash dump: {dump})" if dump else ""
         raise HTTPException(400, f"simc exit {rc}: {detail}{suffix}")
 
-    # Even a successful simc run can carry "Severe" warnings that mean
-    # the resulting numbers are garbage — e.g. an Invalid Hero Talent
-    # tree size, which we'd otherwise hand back to the user as a
-    # plausible-but-wrong DPS. Detect and surface as a user-facing
-    # error so the UI can prompt them to re-save the loadout in-game.
-    stale_hint = (
-        "Invalid Hero Talent tree" in (out_text + err_text)
-        or "Found 12 talents, expected 13" in (out_text + err_text)
-    )
+    # Pre-existing stale-loadout detection: only the *narrow* "Found N
+    # talents, expected M" signature still means a genuinely broken
+    # input (i.e. the loadout points at a tree shape simc no longer
+    # recognises). The broader "Invalid Hero Talent tree" warning is
+    # now produced by simc-Midnight even on byte-current Blizzard codes
+    # and our local decoder rewrites those to the verbose form before
+    # they reach simc — so we no longer flag it here, otherwise valid
+    # runs would surface as stale-loadout errors.
+    stale_hint = "Found 12 talents, expected 13" in (out_text + err_text)
     if stale_hint and data is not None:
         dump = _dump_crash(last_profile, last_args, out_text, err_text)
         suffix = f" (crash dump: {dump})" if dump else ""
         raise HTTPException(
             400,
             (
-                "Stale talent loadout: simc reported 'Invalid Hero Talent "
-                "tree' — this saved loadout was serialised before Blizzard "
-                "extended the hero talent tree. The active talents= line "
-                "in your /simc export is always re-serialised fresh and "
-                "should work; saved loadouts need to be re-saved in-game "
-                "(open each in the in-game talent picker, toggle one "
-                "talent, save again with the same name). Then re-export "
-                "your /simc string."
+                "Stale talent loadout: simc reported a talent-count mismatch "
+                "(typical when a saved loadout was exported before Blizzard "
+                "extended the talent tree). Re-save the loadout in-game and "
+                "re-export your /simc string."
             )
             + suffix,
         )

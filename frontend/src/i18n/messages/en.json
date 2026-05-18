@@ -128,7 +128,33 @@
     "fightProfile": {
       "single_target": "Raid — Single Target",
       "council": "Raid — Council (3 bosses)",
-      "mythic_plus": "Mythic+ pulls (DungeonSlice)"
+      "mythic_plus": "Mythic+ pulls (DungeonSlice)",
+      "custom": "Custom (your own settings)"
+    },
+    "customModal": {
+      "title": "Custom fight profile",
+      "intro": "Tweak how the encounter looks. Start from a preset and adjust from there.",
+      "presetsLabel": "Quick presets",
+      "preset": {
+        "raidBoss": "Raid boss · 1 target · 4 min",
+        "raidCouncil": "Raid council · 3 targets · 3 min",
+        "mplusTrash": "M+ trash pull · 6 mobs · 60 s",
+        "mplusBoss": "M+ boss · 1 target · 3 min",
+        "dungeonSlice": "M+ key slice (DungeonSlice)",
+        "aoeBurst": "AoE burst · 10 mobs · 12 s"
+      },
+      "fightStyle": "Fight style",
+      "fightStyleHint": "Patchwerk = boss tank-and-spank with the number of targets you set; DungeonSlice = simc's built-in M+ wave sequence (own pacing); CastingPatchwerk = caster-friendly variant. Same options simc itself supports.",
+      "dungeonSliceNoteTitle": "Heads-up:",
+      "dungeonSliceNote": "DungeonSlice has its own pre-defined wave sequence (boss + add waves over ~6 minutes). It ignores the 'Targets' setting entirely and uses its built-in pacing. For a 'X mobs for Y seconds' test, pick Patchwerk instead and set the number of targets there.",
+      "desiredTargets": "Targets",
+      "desiredTargetsHint": "How many enemies are up. Council uses 3, small M+ trash ~4-6, big pulls 8-12.",
+      "desiredTargetsDisabledHint": "Ignored by DungeonSlice — it uses its own wave sequence.",
+      "maxTime": "Max time (s)",
+      "maxTimeHint": "Encounter length. Raid bosses ~4 min, M+ trash pulls ~60 s, M+ bosses ~3 min, AoE burst test ~12 s.",
+      "targetError": "Target error %",
+      "targetErrorHint": "Smart-sim stops once the DPS confidence interval drops below this percentage. 0.05 = tight, 0.1 = relaxed (faster).",
+      "apply": "Apply"
     },
     "rotationModesLabel": "Rotation modes to compare",
     "rotationModesHint": "Pick one or more. Each ticked mode is simulated against every loadout × fight profile, so adding 'Blizzard One-Button' gives you a direct with/without comparison.",
@@ -155,12 +181,12 @@
     "rotationLabel": "Rotation",
     "rotation": {
       "simc_default": "SimC default (community APL)",
-      "blizzard": "Blizzard One-Button assist",
+      "blizzard": "Blizzard One-Button (with GCD penalty)",
       "custom": "Custom (use actions= in profile)"
     },
     "rotationHint": {
       "simc_default": "Uses SimC's community-maintained near-optimal rotation for this spec.",
-      "blizzard": "Simulates Blizzard's in-game single-button assist system via use_blizzard_action_list=1.",
+      "blizzard": "Realistic one-button-macro simulation: Blizzard's Assisted Combat APL with the in-game 25% GCD penalty (one_button_mode=1) and cooldowns enabled.",
       "custom": "Runs whatever actions= block is in the pasted profile. Pick this only if you wrote a custom APL."
     },
     "talentsLabel": "Talents (optional)",

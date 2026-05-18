@@ -10,8 +10,30 @@ from pydantic import BaseModel, ConfigDict, Field
 from app.models.simulation import SimulationRunStatus, SimulationStatus
 
 Rotation = Literal["simc_default", "blizzard", "custom"]
-FightProfileKey = Literal["single_target", "council", "mythic_plus"]
+# ``custom`` lets the user pick any combination of fight style /
+# desired_targets / max_time / target_error — paired with
+# :class:`CustomProfileOverrides` on the request body.
+FightProfileKey = Literal["single_target", "council", "mythic_plus", "custom"]
 Precision = Literal["fast", "medium", "precise"]
+
+
+class CustomProfileOverrides(BaseModel):
+    """Per-request overrides for the ``custom`` fight profile.
+
+    Mirrors the four knobs raidbots surfaces in its "Advanced" panel.
+    All fields are optional; missing values fall back to the backend
+    ``CUSTOM_PROFILE_DEFAULTS`` so the user can tweak just one knob
+    without having to spell out the rest.
+    """
+
+    fight_style: str = Field(
+        default="Patchwerk",
+        max_length=64,
+        description="simc fight_style (Patchwerk, DungeonSlice, …).",
+    )
+    desired_targets: int = Field(default=1, ge=1, le=20)
+    max_time: int = Field(default=300, ge=10, le=3600)
+    target_error: float = Field(default=0.05, ge=0.0, le=5.0)
 
 # Iteration count for each precision preset. The /info endpoint exposes
 # these so the frontend can show an indicative count next to the button.
@@ -59,6 +81,11 @@ class SimulationCreate(BaseModel):
         default_factory=lambda: ["simc_default"], min_length=1, max_length=3
     )
     precision: Precision = "precise"
+    # Only consulted when ``fight_profiles`` contains ``"custom"``. The
+    # same override block applies to every custom run in the request —
+    # we don't currently support per-run knobs because the cartesian
+    # combinator wouldn't have anywhere sensible to put them.
+    custom_overrides: CustomProfileOverrides | None = None
 
 
 class SimulationAbility(BaseModel):
@@ -111,6 +138,7 @@ class SimulationOut(BaseModel):
     rotations: list[Rotation]
     iterations: int
     precision: Precision
+    custom_overrides: CustomProfileOverrides | None = None
     status: SimulationStatus
     error: str | None
     started_at: datetime | None

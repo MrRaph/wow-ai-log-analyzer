@@ -413,7 +413,86 @@ public too (Packages → settings → Change visibility). Then:
 - Storage / bandwidth quotas no longer apply
 - You can choose to also push frontend + local-ai images at that point
 
-## 13. Troubleshooting
+## 13. DPS simulations (SimulationCraft sidecar)
+
+The `simc` service in `docker-compose.yml` is the bundled
+SimulationCraft binary plus a thin FastAPI wrapper. It comes up with
+the rest of the stack — no extra opt-in needed — and powers the
+**Simulate** page in the UI.
+
+What it does:
+
+- Accepts a `/simc` profile paste from the in-game SimC Addon
+- Lets you tick which **talent loadouts** to sim against each other
+- Lets you tick which **fight profile** (raid single-target, raid
+  council, M+ DungeonSlice, or a fully custom one) and which
+  **rotation** (community APL, Blizzard one-button with the 25% GCD
+  penalty, or the profile's own `actions=` block)
+- Returns DPS, per-ability breakdowns, fight length, and a comparison
+  grid across every (loadout × fight × rotation) combination
+
+### Saved-loadout repair (auto)
+
+The in-game SimC Addon has a long-standing quirk: only the *active*
+talent loadout is re-serialised at `/simc` time. **Saved** (i.e. not
+currently selected) loadouts get written from a frozen snapshot that
+omits the hero-tree gateway node — simc segfaults during spell
+initialisation on those strings.
+
+The backend ships a local port of simcs talent decoder
+(`backend/app/services/talents/`) that:
+
+1. Decodes the base64 loadout code using simcs `parse_traits_hash`
+   algorithm against the same `trait_data.inc` simcs binary uses
+2. Detects the missing hero-tree gateway entry (e.g. "Rider's
+   Champion" on Unholy DK) and re-injects it — the same thing the
+   game does when you click "Activate" in-game
+3. Emits a verbose `class_talents=/spec_talents=/hero_talents=`
+   block that bypasses the broken hash-validation path
+
+`trait_data.inc` is refreshed from simc/master on every
+`wow_data` import (so it tracks new WoW builds automatically — no
+manual intervention).
+
+### Tuning the sim
+
+Defaults match raidbots — `optimize_expressions=1`,
+`single_actor_batch=1`, and the full `override.*=1` raid-buff stack
+(Bloodlust, Arcane Intellect, Battle Shout, …) are applied to every
+sim. The bundled fight profiles use:
+
+| Profile | fight_style | targets | max_time | target_error |
+|---------|-------------|---------|----------|--------------|
+| Raid — Single Target | Patchwerk | 1 | 90 s | 0.05 % |
+| Raid — Council | Patchwerk | 3 | 90 s | 0.05 % |
+| Mythic+ pulls | DungeonSlice | (built-in waves) | 360 s | 0.05 % |
+| Custom | user-picked | user-picked | user-picked | user-picked |
+
+The Custom modal ships six quick-start presets (Raid Boss / Council /
+M+ Trash Pull / M+ Boss / DungeonSlice / AoE Burst) so common
+scenarios are one click away. Tweak any of the four knobs after
+picking a preset.
+
+### Optional: Battle.net Profile API credentials
+
+The backend ships a Battle.net client (`blizzard_api.py`) that can
+fetch character profile + equipment + specialisations directly. It is
+**not required** for the talent decoder — the decoder works entirely
+from the `/simc` paste. The Battle.net client is reserved for future
+features (live character lookup without manual paste). To opt in,
+register a client at https://develop.battle.net/access/clients and
+fill `BLIZZARD_CLIENT_ID` + `BLIZZARD_CLIENT_SECRET` in `.env`.
+
+### Resource budget
+
+A typical raid single-target sim with 5000 iterations finishes in
+~15-30 s on a modern 4-core CPU; DungeonSlice runs roughly 3× longer
+because the encounter is longer. The sidecar caps concurrent runs
+(`SIMC_DEFAULT_THREADS=4`) — multiple users queue automatically.
+Failed runs save the exact `input.simc` + args + log to the
+`simc-crash-dumps` named volume so you can debug after the fact.
+
+## 14. Troubleshooting
 
 - `backend` keeps restarting → `docker compose logs backend`. The most common
   cause is an unset `SECRET_KEY` or unreachable database.
