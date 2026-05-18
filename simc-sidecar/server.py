@@ -513,39 +513,93 @@ def _parse_result(data: dict, fallback_dps_mean: float = 0.0) -> dict[str, Any]:
     dps_mean = _stat("dps") or fallback_dps_mean
     fight_length = _stat("fight_length")
 
-    abilities: list[dict[str, Any]] = []
-    for stats in player.get("stats") or []:
-        if (stats.get("type") or "").lower() != "damage":
-            continue
-        actual = stats.get("actual_amount") or {}
-        per_iter_damage = float(actual.get("mean", 0.0) or 0.0)
-        if per_iter_damage <= 0:
-            continue
-        per_ability_dps = per_iter_damage / fight_length if fight_length else 0.0
-        # simc emits ``id`` (Blizzard's spell ID — matches wowhead) and
-        # ``spell_name`` (the localized English display name) on stats
-        # entries. Auto-attacks have id=0/1 + empty spell_name (special-
-        # cased on the frontend so we don't link them).
-        spell_id = stats.get("id")
-        try:
-            spell_id_int = int(spell_id) if spell_id is not None else 0
-        except (TypeError, ValueError):
-            spell_id_int = 0
-        abilities.append(
-            {
-                "name": stats.get("name") or "",
+    # simc emits two damage figures per action:
+    #
+    #   actual_amount   — what this action's own ``execute()`` rolled
+    #   compound_amount — actual + everything its proc-children rolled
+    #
+    # The wrapper actions of modern specs (Whirling Dragon Punch,
+    # Flurry Strikes, Zenith, …) deal **all** their damage through
+    # generated sub-actions; ``actual_amount`` is 0 for them and only
+    # ``compound_amount`` shows the real contribution. The sub-actions
+    # are NOT listed separately in ``player.stats`` — they only show
+    # up inside the wrapper's compound figure. So reading
+    # ``compound_amount`` gives us one row per wrapper with the full
+    # contribution and zero double-counting.
+    #
+    # Pets/guardians (Apocalypse ghouls, warlock demons, etc.) live
+    # under ``player.pets[]``; SEF-style cloned actors are still
+    # rendered under the parent player so we don't need to traverse
+    # the whole ``sim.players`` list.
+    actors: list[dict[str, Any]] = [player]
+    actors.extend(player.get("pets") or [])
+
+    merged: dict[tuple[int, str], dict[str, Any]] = {}
+    for actor in actors:
+        actor_name = actor.get("name") or ""
+        is_pet = actor is not player
+        for stats in actor.get("stats") or []:
+            if (stats.get("type") or "").lower() != "damage":
+                continue
+            # simc emits compound_amount either as the canonical
+            # ``{mean: X, min: Y, max: Z, …}`` dict OR as a bare float
+            # for stats that ended up at exactly zero (saves a few
+            # bytes in the JSON). Handle both shapes.
+            compound = stats.get("compound_amount")
+            if isinstance(compound, dict):
+                per_iter_damage = float(compound.get("mean", 0.0) or 0.0)
+            else:
+                per_iter_damage = float(compound or 0.0)
+            if per_iter_damage <= 0:
+                continue
+            per_ability_dps = per_iter_damage / fight_length if fight_length else 0.0
+            spell_id = stats.get("id")
+            try:
+                spell_id_int = int(spell_id) if spell_id is not None else 0
+            except (TypeError, ValueError):
+                spell_id_int = 0
+
+            base_name = stats.get("name") or ""
+            display_name = (
+                f"{actor_name}: {base_name}" if is_pet and actor_name else base_name
+            )
+            # Same (spell_id, display_name) across multiple pet clones
+            # collapses to one row. Damage adds up; executes/hits do
+            # too so the per-row stats reflect the combined effort.
+            key = (spell_id_int, display_name)
+            if key in merged:
+                row = merged[key]
+                row["damage_per_iter"] += per_iter_damage
+                row["dps"] += per_ability_dps
+                row["executes"] += float(
+                    (stats.get("num_executes") or {}).get("mean", 0.0) or 0.0
+                )
+                row["hits"] += float(
+                    (stats.get("num_direct_results") or {}).get("mean", 0.0) or 0.0
+                )
+                continue
+            merged[key] = {
+                "name": display_name,
                 "spell_id": spell_id_int,
                 "spell_name": stats.get("spell_name") or "",
                 "school": stats.get("school") or "",
                 "damage_per_iter": per_iter_damage,
                 "dps": per_ability_dps,
-                "executes": float((stats.get("num_executes") or {}).get("mean", 0.0) or 0.0),
-                "hits": float((stats.get("num_direct_results") or {}).get("mean", 0.0) or 0.0),
+                "executes": float(
+                    (stats.get("num_executes") or {}).get("mean", 0.0) or 0.0
+                ),
+                "hits": float(
+                    (stats.get("num_direct_results") or {}).get("mean", 0.0) or 0.0
+                ),
                 "crit_pct": float(stats.get("portion_amount", 0.0) or 0.0) * 100.0,
             }
-        )
-    abilities.sort(key=lambda x: x["dps"], reverse=True)
-    total_dps = sum(a["dps"] for a in abilities) or dps_mean
+
+    abilities = sorted(merged.values(), key=lambda x: x["dps"], reverse=True)
+    # pct = share of the parent simulation's total DPS. Compound
+    # amounts ideally sum to dps_mean (within a few percent variance)
+    # because every meaningful damage event in simc rolls up through
+    # exactly one wrapper.
+    total_dps = dps_mean or sum(a["dps"] for a in abilities)
     for a in abilities:
         a["pct"] = (a["dps"] / total_dps * 100.0) if total_dps else 0.0
 
