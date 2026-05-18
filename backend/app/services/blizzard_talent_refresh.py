@@ -46,6 +46,28 @@ def _extract_base64_code(text: str) -> str | None:
     return None
 
 
+def _active_talents_code(profile: str) -> str:
+    """Find the uncommented ``talents=<code>`` line in a /simc paste.
+
+    The in-game ``/simc`` command always emits exactly one such line for
+    the currently-active loadout (alongside zero-or-more ``# Saved
+    Loadout: …`` blocks). The active line is freshly re-serialised by
+    the game on export and is the only string that's guaranteed to
+    round-trip cleanly through simcs base64 decoder — including the
+    spec-passive crossover entries from neighbouring hero trees that
+    simcs verbose parser would otherwise reject as "extra talents".
+
+    Returns ``""`` if no plain ``talents=`` line is present.
+    """
+    for line in (profile or "").splitlines():
+        stripped = line.lstrip()
+        if stripped.startswith("#"):
+            continue
+        if stripped.startswith("talents="):
+            return stripped[len("talents=") :].strip()
+    return ""
+
+
 def _decode(code: str) -> DecodedLoadout | None:
     try:
         dataset = get_dataset()
@@ -78,13 +100,17 @@ async def refresh_loadout_talents(
     the user would have gotten without us, which is better than swapping
     in a wrong build silently.
 
-    ``simc_profile`` is kept in the signature for API stability (the
-    worker passes it). We dont actually need it for the local decoder
-    — the spec id comes embedded in every loadout code.
+    ``simc_profile`` is used to identify the *active* loadout — the
+    uncommented ``talents=`` line in the paste — which we deliberately
+    skip the decoder for. The active state is freshly re-serialised by
+    the game on every ``/simc`` and is the only string that round-
+    trips cleanly through simcs base64 path (including spec-passive
+    crossover entries from neighbouring hero trees that our verbose
+    output would reject as "Found N talents, expected M+1").
 
     Returns a NEW list — never mutates the caller's input.
     """
-    del simc_profile  # parameter kept for API stability with the worker call site
+    active_code = _active_talents_code(simc_profile)
 
     refreshed: list[dict[str, object]] = []
     for ld in loadouts:
@@ -95,6 +121,16 @@ async def refresh_loadout_talents(
         code = _extract_base64_code(text)
         if not code:
             # Already in expanded form, or empty — pass through.
+            refreshed.append(dict(ld))
+            continue
+        if active_code and code == active_code:
+            # Active loadout: pass through unchanged. simcs base64
+            # decoder accepts it cleanly, including the cross-tree
+            # spec-passive talents the verbose path would reject.
+            logger.info(
+                "talent refresh: %r is the active loadout — skipping decode",
+                ld.get("name") or "?",
+            )
             refreshed.append(dict(ld))
             continue
         decoded = _decode(code)
