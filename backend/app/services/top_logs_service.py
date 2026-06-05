@@ -416,7 +416,7 @@ async def list_top_logs(
     metric: str | None = None,
     wcl_flavor: str = "retail",
 ) -> list[TopLog]:
-    flavor = to_client_flavor(wcl_flavor)
+    flavor = normalize_wcl_flavor(wcl_flavor)
     stmt = select(TopLog).where(TopLog.spec_slug == spec_slug, TopLog.wcl_flavor == flavor)
     if encounter_id is not None:
         stmt = stmt.where(TopLog.encounter_id == encounter_id)
