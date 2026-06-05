@@ -24,7 +24,7 @@ from app.config import settings
 from app.db import async_session_factory
 from app.models import GameSpec, TopLog, TopLogsSeedJob
 from app.services.top_logs_service import refresh_top_logs_for_spec_encounter
-from app.services.wcl.client import WclClient
+from app.services.wcl.client import create_wcl_client
 from app.services.wcl_zones_service import fetch_current_raid_encounters
 
 logger = logging.getLogger(__name__)
@@ -111,41 +111,50 @@ async def refresh_all_top_logs(_ctx: dict) -> int:
     logger.info("weekly top-logs: queued %d new current-tier seed jobs", seeded_new)
 
     refreshed = 0
-    async with WclClient() as wcl, async_session_factory() as session:
+    async with async_session_factory() as session:
         async with session.begin():
             specs = list(
                 (await session.execute(select(GameSpec))).scalars().all()
             )
             existing = (
                 await session.execute(
-                    select(TopLog.spec_slug, TopLog.encounter_id, TopLog.metric).distinct()
+                    select(
+                        TopLog.spec_slug,
+                        TopLog.encounter_id,
+                        TopLog.metric,
+                        TopLog.wcl_flavor,
+                    ).distinct()
                 )
             ).all()
-        pairs: set[tuple[str, int, str]] = {(s, e, m) for s, e, m in existing}
+        pairs: set[tuple[str, int, str, str]] = {(s, e, m, f) for s, e, m, f in existing}
         spec_by_slug = {s.slug: s for s in specs}
 
         # Commit per (spec, encounter, metric) so partial progress survives
         # a crash and admins can watch counts climb in the UI.
-        for spec_slug, encounter_id, metric in sorted(pairs):
+        for spec_slug, encounter_id, metric, wcl_flavor in sorted(pairs):
             spec = spec_by_slug.get(spec_slug)
             if not spec:
                 continue
             try:
-                async with session.begin():
-                    rows = await refresh_top_logs_for_spec_encounter(
-                        session,
-                        spec=spec,
-                        encounter_id=encounter_id,
-                        metric=metric,
-                        wcl_client=wcl,
-                    )
+                client = create_wcl_client(flavor="fresh" if wcl_flavor == "fresh" else "retail")
+                async with client:
+                    async with session.begin():
+                        rows = await refresh_top_logs_for_spec_encounter(
+                            session,
+                            spec=spec,
+                            encounter_id=encounter_id,
+                            metric=metric,
+                            wcl_flavor=wcl_flavor,
+                            wcl_client=client,
+                        )
                 refreshed += len(rows)
             except Exception:  # noqa: BLE001
                 logger.exception(
-                    "top-logs refresh failed for spec=%s encounter=%s metric=%s",
+                    "top-logs refresh failed for spec=%s encounter=%s metric=%s flavor=%s",
                     spec.slug,
                     encounter_id,
                     metric,
+                    wcl_flavor,
                 )
     logger.info(
         "weekly top-logs refresh complete (%s rows refreshed, %s new seed jobs queued)",

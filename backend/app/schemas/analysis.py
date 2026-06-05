@@ -152,6 +152,7 @@ class TopLogOut(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
     id: uuid.UUID
+    wcl_flavor: str
     spec_slug: str
     encounter_id: int
     encounter_name: str

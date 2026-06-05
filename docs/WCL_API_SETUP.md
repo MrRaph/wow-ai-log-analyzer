@@ -35,6 +35,18 @@ Both flows use the *same* WCL API client. You only register one.
    Set `WCL_REDIRECT_URI` to the **exact** URL the browser will land on. For
    local dev that's `http://localhost:8000/api/v1/auth/wcl/callback`.
 
+## Classic Fresh (optional)
+
+Classic Fresh uses a separate Warcraft Logs host and OAuth client registry.
+If you want Fresh private-log access, create a second client at
+`https://fresh.warcraftlogs.com/api/clients/` and fill:
+
+```env
+WCL_FRESH_CLIENT_ID=...
+WCL_FRESH_CLIENT_SECRET=...
+WCL_FRESH_REDIRECT_URI=https://<your-domain>/api/v1/auth/wcl-fresh/callback
+```
+
 ## Rate limiting
 
 WCL applies a per-client request budget (rolling window). The analyzer keeps

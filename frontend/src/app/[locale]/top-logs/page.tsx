@@ -27,6 +27,7 @@ function TopLogsView({ locale, user }: { locale: Locale; user: UserOut }) {
   const [classSlug, setClassSlug] = useState<string>("");
   const [specSlug, setSpecSlug] = useState<string>("");
   const [encounterId, setEncounterId] = useState<string>("");
+  const [wclFlavor, setWclFlavor] = useState<"retail" | "fresh">("retail");
 
   useEffect(() => {
     if (!classSlug && classesQ.data?.length) {
@@ -40,12 +41,12 @@ function TopLogsView({ locale, user }: { locale: Locale; user: UserOut }) {
   const metric = spec?.role === "healer" ? "hps" : "dps";
 
   const topLogsQ = useQuery({
-    queryKey: ["top-logs", specSlug, encounterId, metric],
+    queryKey: ["top-logs", specSlug, encounterId, metric, wclFlavor],
     queryFn: () =>
       apiFetch<TopLog[]>(
         `/api/v1/top-logs?spec_slug=${specSlug}` +
           (encounterId ? `&encounter_id=${encounterId}` : "") +
-          `&metric=${metric}`,
+          `&metric=${metric}&wcl_flavor=${wclFlavor}`,
       ),
     enabled: !!specSlug,
   });
@@ -54,11 +55,12 @@ function TopLogsView({ locale, user }: { locale: Locale; user: UserOut }) {
     mutationFn: () => {
       if (!specSlug || !encounterId) throw new Error("encounter_id required");
       return apiFetch(
-        `/api/v1/top-logs/refresh?spec_slug=${specSlug}&encounter_id=${encounterId}&metric=${metric}`,
+        `/api/v1/top-logs/refresh?spec_slug=${specSlug}&encounter_id=${encounterId}&metric=${metric}&wcl_flavor=${wclFlavor}`,
         { method: "POST" },
       );
     },
-    onSuccess: () => qc.invalidateQueries({ queryKey: ["top-logs", specSlug, encounterId, metric] }),
+    onSuccess: () =>
+      qc.invalidateQueries({ queryKey: ["top-logs", specSlug, encounterId, metric, wclFlavor] }),
   });
 
   const grouped = useMemo(() => {
@@ -77,7 +79,7 @@ function TopLogsView({ locale, user }: { locale: Locale; user: UserOut }) {
         <h1 className="font-display text-3xl font-semibold">{t("topLogs.title")}</h1>
       </header>
       <Card>
-        <div className="grid gap-4 md:grid-cols-4">
+        <div className="grid gap-4 md:grid-cols-5">
           <div>
             <Label>{t("topLogs.selectClass")}</Label>
             <Select
@@ -127,6 +129,13 @@ function TopLogsView({ locale, user }: { locale: Locale; user: UserOut }) {
                     </option>
                   ));
               })()}
+            </Select>
+          </div>
+          <div>
+            <Label>{locale === "de" ? "Quelle" : "Source"}</Label>
+            <Select value={wclFlavor} onChange={(e) => setWclFlavor(e.target.value as "retail" | "fresh")}>
+              <option value="retail">Retail (www.warcraftlogs.com)</option>
+              <option value="fresh">Classic Fresh (fresh.warcraftlogs.com)</option>
             </Select>
           </div>
           <div className="flex items-end">
@@ -191,7 +200,13 @@ function TopLogsView({ locale, user }: { locale: Locale; user: UserOut }) {
                   <td className="px-3 py-2 text-right tabular-nums">{formatDuration(r.duration_ms)}</td>
                   <td className="px-3 py-2 text-right">
                     <a
-                      href={`https://www.warcraftlogs.com/reports/${r.wcl_report_code}#fight=${r.wcl_fight_id}`}
+                      href={`${
+                        r.wcl_flavor === "fresh"
+                          ? "https://fresh.warcraftlogs.com"
+                          : r.wcl_flavor === "classic"
+                            ? "https://classic.warcraftlogs.com"
+                            : "https://www.warcraftlogs.com"
+                      }/reports/${r.wcl_report_code}#fight=${r.wcl_fight_id}`}
                       target="_blank"
                       rel="noopener noreferrer"
                     >
@@ -227,7 +242,13 @@ function TopLogsView({ locale, user }: { locale: Locale; user: UserOut }) {
                     {formatDuration(r.duration_ms)}
                   </span>
                   <a
-                    href={`https://www.warcraftlogs.com/reports/${r.wcl_report_code}#fight=${r.wcl_fight_id}`}
+                    href={`${
+                      r.wcl_flavor === "fresh"
+                        ? "https://fresh.warcraftlogs.com"
+                        : r.wcl_flavor === "classic"
+                          ? "https://classic.warcraftlogs.com"
+                          : "https://www.warcraftlogs.com"
+                    }/reports/${r.wcl_report_code}#fight=${r.wcl_fight_id}`}
                     target="_blank"
                     rel="noopener noreferrer"
                     className="text-accent"

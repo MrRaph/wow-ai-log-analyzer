@@ -391,6 +391,12 @@ function ReportView({
 }) {
   const [fightId, setFightId] = useState<string | null>(report.fights[0]?.id ?? null);
   const fight = report.fights.find((f) => f.id === fightId) ?? report.fights[0];
+  const reportBase =
+    report.wcl_flavor === "fresh"
+      ? "https://fresh.warcraftlogs.com"
+      : report.wcl_flavor === "classic"
+        ? "https://classic.warcraftlogs.com"
+        : "https://www.warcraftlogs.com";
   return (
     <div className="space-y-4">
       <Card>
@@ -399,11 +405,11 @@ function ReportView({
             <h2 className="text-lg font-semibold">{report.title || report.zone_name}</h2>
             <p className="text-xs text-zinc-500">
               <a
-                href={`https://www.warcraftlogs.com/reports/${report.wcl_code}`}
+                href={`${reportBase}/reports/${report.wcl_code}`}
                 target="_blank"
                 rel="noopener noreferrer"
               >
-                warcraftlogs.com/reports/{report.wcl_code}
+                {reportBase.replace("https://", "")}/reports/{report.wcl_code}
               </a>
             </p>
           </div>

@@ -15,7 +15,7 @@ from app.models import (
     ReportPlayer,
     ReportPlayerGear,
 )
-from app.services.wcl.client import WclClient
+from app.services.wcl.client import WclClient, create_wcl_client
 from app.services.wcl.parser import (
     aggregate_boss_casts,
     parse_damage_done_table,
@@ -24,7 +24,7 @@ from app.services.wcl.parser import (
     parse_gear_from_player_details,
     parse_healing_done_table,
     parse_player_details,
-    parse_report_input,
+    parse_report_input_details,
     parse_report_overview,
     parse_report_rankings_for_fight,
 )
@@ -113,14 +113,17 @@ async def create_import_skeleton(
     rows the caller may want to re-trigger the worker — that's handled at
     the API layer, not here.
     """
-    code = parse_report_input(raw_input)
+    code, flavor = parse_report_input_details(raw_input)
     existing = (
-        await session.execute(select(Report).where(Report.wcl_code == code))
+        await session.execute(
+            select(Report).where(Report.wcl_code == code, Report.wcl_flavor == flavor)
+        )
     ).scalar_one_or_none()
     if existing is not None:
         return existing
     report = Report(
         wcl_code=code,
+        wcl_flavor=flavor,
         title="",
         owner_user_id=owner_user_id,
         import_status="importing",
@@ -195,13 +198,19 @@ async def run_report_import(
     code = report.wcl_code
     owner_user_id = report.owner_user_id
     own_client = wcl_client is None
+    flavor = (report.wcl_flavor or "retail").lower()
+    if flavor not in {"retail", "fresh", "classic"}:
+        flavor = "retail"
     if wcl_client is None and owner_user_id is not None:
         from app.services.wcl_oauth_service import build_user_wcl_client
 
-        wcl_client = await build_user_wcl_client(session, user_id=owner_user_id)
-    client = wcl_client or WclClient()
+        wcl_client = await build_user_wcl_client(session, user_id=owner_user_id, flavor=flavor)
+    client = wcl_client or create_wcl_client(flavor=flavor)
     try:
-        overview = parse_report_overview(await client.query(REPORT_OVERVIEW, {"code": code}))
+        overview = parse_report_overview(
+            await client.query(REPORT_OVERVIEW, {"code": code}),
+            wcl_flavor=flavor,
+        )
         report.title = overview["title"]
         report.zone_id = overview["zone_id"]
         report.zone_name = overview["zone_name"]
@@ -254,10 +263,15 @@ async def run_report_import(
             await client.aclose()
 
 
-async def _get_report_with_data(session: AsyncSession, code: str) -> Report | None:
+async def _get_report_with_data(
+    session: AsyncSession,
+    code: str,
+    *,
+    wcl_flavor: str = "retail",
+) -> Report | None:
     stmt = (
         select(Report)
-        .where(Report.wcl_code == code)
+        .where(Report.wcl_code == code, Report.wcl_flavor == wcl_flavor)
         .options(
             selectinload(Report.fights)
             .selectinload(ReportFight.players)
@@ -440,8 +454,8 @@ async def _populate_players(
     await session.flush()
 
 
-async def get_report(session: AsyncSession, *, code: str) -> Report:
-    report = await _get_report_with_data(session, code)
+async def get_report(session: AsyncSession, *, code: str, wcl_flavor: str = "retail") -> Report:
+    report = await _get_report_with_data(session, code, wcl_flavor=wcl_flavor)
     if not report:
         raise NotFoundError("Report not found.")
     return report

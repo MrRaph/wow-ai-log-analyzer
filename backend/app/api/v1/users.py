@@ -1,7 +1,7 @@
 """User-self endpoints (/users/me)."""
 from __future__ import annotations
 
-from fastapi import APIRouter, status
+from fastapi import APIRouter, Query, status
 from sqlalchemy import delete
 
 from app.core.errors import AuthError, NotFoundError, ValidationAppError
@@ -62,12 +62,17 @@ async def delete_me(user: CurrentUser, session: SessionDep) -> None:
 
 
 @router.get("/me/wcl-connection", response_model=WclConnectionStatus)
-async def read_wcl_connection(user: CurrentUser, session: SessionDep) -> WclConnectionStatus:
-    conn = await wcl_oauth_service.get_connection(session, user.id)
+async def read_wcl_connection(
+    user: CurrentUser,
+    session: SessionDep,
+    flavor: str = Query(default="retail", pattern=r"^(retail|fresh|classic)$"),
+) -> WclConnectionStatus:
+    conn = await wcl_oauth_service.get_connection(session, user.id, flavor=flavor)
     if not conn:
-        return WclConnectionStatus(connected=False)
+        return WclConnectionStatus(connected=False, flavor=flavor)
     return WclConnectionStatus(
         connected=True,
+        flavor=conn.flavor,
         wcl_user_id=conn.wcl_user_id,
         wcl_user_name=conn.wcl_user_name,
         expires_at=conn.expires_at,
@@ -76,8 +81,12 @@ async def read_wcl_connection(user: CurrentUser, session: SessionDep) -> WclConn
 
 
 @router.delete("/me/wcl-connection", status_code=status.HTTP_204_NO_CONTENT)
-async def delete_wcl_connection(user: CurrentUser, session: SessionDep) -> None:
-    await wcl_oauth_service.disconnect(session, user.id)
+async def delete_wcl_connection(
+    user: CurrentUser,
+    session: SessionDep,
+    flavor: str = Query(default="retail", pattern=r"^(retail|fresh|classic)$"),
+) -> None:
+    await wcl_oauth_service.disconnect(session, user.id, flavor=flavor)
     await session.commit()
 
 

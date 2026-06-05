@@ -24,7 +24,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import settings
 from app.models import GameSpec, Role, TopLog
-from app.services.wcl.client import WclClient
+from app.services.wcl.client import WclClient, create_wcl_client
 from app.services.report_service import fetch_boss_cast_timeline
 from app.services.wcl.parser import (
     composition_from_player_details,
@@ -87,6 +87,7 @@ async def refresh_top_logs_for_spec_encounter(
     limit: int | None = None,
     detail_count: int | None = None,
     is_raid: bool = True,
+    wcl_flavor: str = "retail",
     wcl_client: WclClient | None = None,
     incremental: bool = True,
 ) -> list[TopLog]:
@@ -101,10 +102,11 @@ async def refresh_top_logs_for_spec_encounter(
     re-fetch.
     """
     metric = metric or _metric_for_role(spec.role)
+    flavor = "fresh" if wcl_flavor == "fresh" else "retail"
     limit = limit or settings.top_logs_limit
     detail_count = detail_count if detail_count is not None else settings.top_logs_detail_count
     own = wcl_client is None
-    client = wcl_client or WclClient()
+    client = wcl_client or create_wcl_client(flavor=flavor)
 
     # Snapshot the cache so we can reuse detail data for stable entries.
     cached_detail: dict[tuple[str, int], dict[str, Any]] = {}
@@ -115,6 +117,7 @@ async def refresh_top_logs_for_spec_encounter(
                     TopLog.spec_slug == spec.slug,
                     TopLog.encounter_id == encounter_id,
                     TopLog.metric == metric,
+                    TopLog.wcl_flavor == flavor,
                 )
             )
         ).scalars().all()
@@ -241,6 +244,7 @@ async def refresh_top_logs_for_spec_encounter(
             TopLog.spec_slug == spec.slug,
             TopLog.encounter_id == encounter_id,
             TopLog.metric == metric,
+            TopLog.wcl_flavor == flavor,
         )
     )
 
@@ -251,6 +255,7 @@ async def refresh_top_logs_for_spec_encounter(
         rows.append(
             TopLog(
                 spec_slug=spec.slug,
+                wcl_flavor=flavor,
                 encounter_id=r["encounter_id"],
                 encounter_name=r["encounter_name"],
                 difficulty=settings.top_logs_raid_difficulty if is_raid else None,
@@ -409,8 +414,10 @@ async def list_top_logs(
     spec_slug: str,
     encounter_id: int | None = None,
     metric: str | None = None,
+    wcl_flavor: str = "retail",
 ) -> list[TopLog]:
-    stmt = select(TopLog).where(TopLog.spec_slug == spec_slug)
+    flavor = "fresh" if wcl_flavor == "fresh" else "retail"
+    stmt = select(TopLog).where(TopLog.spec_slug == spec_slug, TopLog.wcl_flavor == flavor)
     if encounter_id is not None:
         stmt = stmt.where(TopLog.encounter_id == encounter_id)
     if metric is not None:

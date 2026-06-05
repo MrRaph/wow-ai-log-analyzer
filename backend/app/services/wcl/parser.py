@@ -4,38 +4,58 @@ WCL URL shapes we accept (all yield the same code):
 - https://www.warcraftlogs.com/reports/{CODE}
 - https://www.warcraftlogs.com/reports/{CODE}#fight=42
 - https://classic.warcraftlogs.com/reports/{CODE}
+- https://fresh.warcraftlogs.com/reports/{CODE}
 - bare {CODE} (16-character alphanumeric WCL id)
 """
 from __future__ import annotations
 
 import re
 from datetime import UTC, datetime
-from typing import Any
+from typing import Any, Literal
 
 from app.core.errors import ValidationAppError
 
 _WCL_CODE_RE = re.compile(r"^[A-Za-z0-9]{16}$")
-_WCL_URL_RE = re.compile(r"warcraftlogs\.com/reports/([A-Za-z0-9]{16})")
+_WCL_URL_RE = re.compile(
+    r"(?:(?P<host>[a-z0-9-]+)\.)?warcraftlogs\.com/reports/(?P<code>[A-Za-z0-9]{16})",
+    re.IGNORECASE,
+)
+WclFlavor = Literal["retail", "fresh", "classic"]
 
 
-def parse_report_input(value: str) -> str:
-    """Return the bare WCL report code from a URL or pasted code."""
+def _domain_to_flavor(host: str | None) -> WclFlavor:
+    subdomain = (host or "").strip().lower()
+    if subdomain == "fresh":
+        return "fresh"
+    if subdomain == "classic":
+        return "classic"
+    return "retail"
+
+
+def parse_report_input_details(value: str) -> tuple[str, WclFlavor]:
+    """Return ``(report_code, flavor)`` from a URL or pasted code."""
     value = (value or "").strip()
     if not value:
         raise ValidationAppError("No report URL or code provided.")
     if _WCL_CODE_RE.match(value):
-        return value
+        return value, "retail"
     m = _WCL_URL_RE.search(value)
     if m:
-        return m.group(1)
+        return m.group("code"), _domain_to_flavor(m.group("host"))
     raise ValidationAppError("Could not extract a Warcraft Logs report code from the input.")
+
+
+def parse_report_input(value: str) -> str:
+    """Return the bare WCL report code from a URL or pasted code."""
+    code, _ = parse_report_input_details(value)
+    return code
 
 
 def _ms_to_dt(ms: float | int) -> datetime:
     return datetime.fromtimestamp(ms / 1000, tz=UTC)
 
 
-def parse_report_overview(payload: dict[str, Any]) -> dict[str, Any]:
+def parse_report_overview(payload: dict[str, Any], *, wcl_flavor: WclFlavor = "retail") -> dict[str, Any]:
     """Normalise the ``reportData.report`` overview into a dict ready for ORM use."""
     rd = (payload or {}).get("reportData", {})
     report = rd.get("report") if rd else None
@@ -132,9 +152,9 @@ def parse_report_overview(payload: dict[str, Any]) -> dict[str, Any]:
         "zone_id": zone.get("id"),
         "zone_name": zone.get("name") or "",
         "region": region.get("compactName") or "",
-        # WCL no longer exposes gameVersion on Report. We're hitting the
-        # retail API endpoints, so we hardcode "retail".
-        "game_version": "retail",
+        # WCL no longer exposes gameVersion on Report. Use the endpoint
+        # flavor we queried against as our canonical game_version marker.
+        "game_version": "classic" if wcl_flavor in {"fresh", "classic"} else "retail",
         "start_time": _ms_to_dt(report["startTime"]),
         "end_time": _ms_to_dt(report["endTime"]),
         "fights": fights,

@@ -17,7 +17,7 @@ import asyncio
 import logging
 import time
 from collections.abc import Awaitable, Callable
-from typing import Any
+from typing import Any, Literal
 
 import httpx
 from tenacity import (
@@ -34,6 +34,7 @@ from app.core.errors import UpstreamError
 logger = logging.getLogger(__name__)
 
 UserTokenProvider = Callable[[], Awaitable[str]]
+WclFlavor = Literal["retail", "fresh", "classic"]
 
 
 class WclClient:
@@ -145,3 +146,34 @@ class WclClient:
                     raise UpstreamError(f"WCL GraphQL error: {msg}")
                 return payload.get("data", {})
         raise UpstreamError("WCL query failed without a successful attempt.")
+
+
+def _client_credentials_for_flavor(flavor: WclFlavor) -> tuple[str, str]:
+    if flavor == "fresh":
+        return settings.wcl_fresh_client_id, settings.wcl_fresh_client_secret
+    return settings.wcl_client_id, settings.wcl_client_secret
+
+
+def _api_urls_for_flavor(flavor: WclFlavor) -> tuple[str, str, str]:
+    if flavor == "fresh":
+        return (
+            settings.wcl_fresh_api_url,
+            settings.wcl_fresh_user_api_url,
+            settings.wcl_fresh_oauth_token_url,
+        )
+    return settings.wcl_api_url, settings.wcl_user_api_url, settings.wcl_oauth_token_url
+
+
+def create_wcl_client(
+    *, flavor: WclFlavor = "retail", user_token_provider: UserTokenProvider | None = None
+) -> WclClient:
+    client_id, client_secret = _client_credentials_for_flavor(flavor)
+    api_url, user_api_url, token_url = _api_urls_for_flavor(flavor)
+    return WclClient(
+        client_id=client_id,
+        client_secret=client_secret,
+        api_url=api_url,
+        user_api_url=user_api_url,
+        token_url=token_url,
+        user_token_provider=user_token_provider,
+    )
