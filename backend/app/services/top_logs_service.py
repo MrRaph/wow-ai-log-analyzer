@@ -24,7 +24,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import settings
 from app.models import GameSpec, Role, TopLog
-from app.services.wcl.client import WclClient, create_wcl_client
+from app.services.wcl.client import WclClient, create_wcl_client, to_client_flavor
 from app.services.report_service import fetch_boss_cast_timeline
 from app.services.wcl.parser import (
     composition_from_player_details,
@@ -102,7 +102,7 @@ async def refresh_top_logs_for_spec_encounter(
     re-fetch.
     """
     metric = metric or _metric_for_role(spec.role)
-    flavor = "fresh" if wcl_flavor == "fresh" else "retail"
+    flavor = to_client_flavor(wcl_flavor)
     limit = limit or settings.top_logs_limit
     detail_count = detail_count if detail_count is not None else settings.top_logs_detail_count
     own = wcl_client is None
@@ -416,7 +416,7 @@ async def list_top_logs(
     metric: str | None = None,
     wcl_flavor: str = "retail",
 ) -> list[TopLog]:
-    flavor = "fresh" if wcl_flavor == "fresh" else "retail"
+    flavor = to_client_flavor(wcl_flavor)
     stmt = select(TopLog).where(TopLog.spec_slug == spec_slug, TopLog.wcl_flavor == flavor)
     if encounter_id is not None:
         stmt = stmt.where(TopLog.encounter_id == encounter_id)

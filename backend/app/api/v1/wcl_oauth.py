@@ -58,7 +58,7 @@ async def _wcl_oauth_callback(
             flavor=flavor,
         )
         await session.commit()
-    except Exception as exc:  # noqa: BLE001
+    except Exception as exc:
         logger.exception("WCL OAuth callback failed")
         params = urlencode({"wcl": "error", "reason": exc.__class__.__name__})
         return RedirectResponse(url=f"{base}/en/profile?{params}", status_code=302)

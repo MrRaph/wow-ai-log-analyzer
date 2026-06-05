@@ -94,7 +94,7 @@ export function WclConnectionPanel({ locale, flavor }: { locale: Locale; flavor:
             <p className="text-sm text-zinc-100">{connectedLabel}</p>
             {status.expires_at && (
               <p className="text-xs text-zinc-500">
-                {locale === "de" ? "Token läuft ab am" : "Token expires"}: {" "}
+                {locale === "de" ? "Token läuft ab am" : "Token expires"}:{" "}
                 {formatDateTime(status.expires_at, locale)}
               </p>
             )}

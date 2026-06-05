@@ -24,7 +24,7 @@ from app.config import settings
 from app.db import async_session_factory
 from app.models import GameSpec, TopLog, TopLogsSeedJob
 from app.services.top_logs_service import refresh_top_logs_for_spec_encounter
-from app.services.wcl.client import create_wcl_client
+from app.services.wcl.client import create_wcl_client, to_client_flavor
 from app.services.wcl_zones_service import fetch_current_raid_encounters
 
 logger = logging.getLogger(__name__)
@@ -52,7 +52,9 @@ async def _seed_missing_current_tier_encounters() -> int:
             cached_encounter_ids = set(
                 (
                     await session.execute(
-                        select(TopLog.encounter_id).distinct()
+                        select(TopLog.encounter_id)
+                        .where(TopLog.wcl_flavor == "retail")
+                        .distinct()
                     )
                 )
                 .scalars()
@@ -136,7 +138,7 @@ async def refresh_all_top_logs(_ctx: dict) -> int:
             if not spec:
                 continue
             try:
-                client = create_wcl_client(flavor="fresh" if wcl_flavor == "fresh" else "retail")
+                client = create_wcl_client(flavor=to_client_flavor(wcl_flavor))
                 async with client:
                     async with session.begin():
                         rows = await refresh_top_logs_for_spec_encounter(

@@ -9,7 +9,7 @@ from __future__ import annotations
 import logging
 import uuid
 from datetime import UTC, datetime, timedelta
-from typing import Any, Literal
+from typing import Any
 from urllib.parse import urlencode
 
 import httpx
@@ -21,11 +21,9 @@ from app.core.crypto import decrypt_str, encrypt_str
 from app.core.errors import AuthError, NotFoundError, UpstreamError, ValidationAppError
 from app.core.security import create_state_token, decode_state_token
 from app.models import User, UserWclConnection
-from app.services.wcl.client import WclClient, create_wcl_client
+from app.services.wcl.client import WclClient, create_wcl_client, normalize_wcl_flavor, to_client_flavor
 
 logger = logging.getLogger(__name__)
-
-AllowedWclFlavor = Literal["retail", "fresh", "classic"]
 
 CURRENT_USER_QUERY = """
 query CurrentUser {
@@ -39,15 +37,8 @@ query CurrentUser {
 """
 
 
-def _normalize_flavor(flavor: str | None) -> AllowedWclFlavor:
-    f = (flavor or "retail").strip().lower()
-    if f in {"retail", "fresh", "classic"}:
-        return f  # type: ignore[return-value]
-    return "retail"
-
-
 def _oauth_settings(flavor: str) -> dict[str, str]:
-    f = _normalize_flavor(flavor)
+    f = normalize_wcl_flavor(flavor)
     if f == "fresh":
         return {
             "client_id": settings.wcl_fresh_client_id,
@@ -67,10 +58,6 @@ def _oauth_settings(flavor: str) -> dict[str, str]:
         "scope": settings.wcl_oauth_scope,
         "user_api_url": settings.wcl_user_api_url,
     }
-
-
-def _client_flavor(flavor: str) -> Literal["retail", "fresh"]:
-    return "fresh" if _normalize_flavor(flavor) == "fresh" else "retail"
 
 
 def build_authorization_url(*, user: User, flavor: str = "retail") -> str:
@@ -130,11 +117,12 @@ async def _fetch_current_user(access_token: str, *, flavor: str = "retail") -> t
     """Best-effort: ask /api/v2/user who the token belongs to."""
     cfg = _oauth_settings(flavor)
     try:
+        auth_header = "Bearer " + access_token
         async with httpx.AsyncClient(timeout=15) as http:
             resp = await http.post(
                 cfg["user_api_url"],
                 json={"query": CURRENT_USER_QUERY},
-                headers={"Authorization": "Bearer " + access_token},
+                headers={"Authorization": auth_header},
             )
             resp.raise_for_status()
             payload = resp.json()
@@ -164,7 +152,7 @@ async def handle_callback(
     if not user or not user.is_active:
         raise NotFoundError("Authenticated user no longer exists.")
 
-    normalized = _normalize_flavor(flavor)
+    normalized = normalize_wcl_flavor(flavor)
     token_data = await _exchange_code_for_token(code, flavor=normalized)
     access_token = str(token_data["access_token"])
     refresh_token = token_data.get("refresh_token")
@@ -213,7 +201,7 @@ async def get_connection(
     *,
     flavor: str = "retail",
 ) -> UserWclConnection | None:
-    normalized = _normalize_flavor(flavor)
+    normalized = normalize_wcl_flavor(flavor)
     return (
         await session.execute(
             select(UserWclConnection).where(
@@ -265,11 +253,11 @@ async def build_user_wcl_client(
     session: AsyncSession, *, user_id: uuid.UUID, flavor: str = "retail"
 ) -> WclClient | None:
     """Return a WclClient bound to the user's token, or ``None`` if not connected."""
-    normalized = _normalize_flavor(flavor)
+    normalized = normalize_wcl_flavor(flavor)
     conn = await get_connection(session, user_id, flavor=normalized)
     if not conn:
         return None
     return create_wcl_client(
-        flavor=_client_flavor(normalized),
+        flavor=to_client_flavor(normalized),
         user_token_provider=make_user_token_provider(session, conn),
     )

@@ -4,7 +4,7 @@ from __future__ import annotations
 from fastapi import APIRouter, Query, status
 from sqlalchemy import delete
 
-from app.core.errors import AuthError, NotFoundError, ValidationAppError
+from app.core.errors import AuthError, ValidationAppError
 from app.core.security import hash_password, verify_password
 from app.deps import CurrentUser, SessionDep
 from app.models import Report

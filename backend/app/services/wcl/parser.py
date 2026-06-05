@@ -32,6 +32,10 @@ def _domain_to_flavor(host: str | None) -> WclFlavor:
     return "retail"
 
 
+def _flavor_to_game_version(wcl_flavor: WclFlavor) -> str:
+    return "classic" if wcl_flavor in {"fresh", "classic"} else "retail"
+
+
 def parse_report_input_details(value: str) -> tuple[str, WclFlavor]:
     """Return ``(report_code, flavor)`` from a URL or pasted code."""
     value = (value or "").strip()
@@ -152,9 +156,11 @@ def parse_report_overview(payload: dict[str, Any], *, wcl_flavor: WclFlavor = "r
         "zone_id": zone.get("id"),
         "zone_name": zone.get("name") or "",
         "region": region.get("compactName") or "",
-        # WCL no longer exposes gameVersion on Report. Use the endpoint
-        # flavor we queried against as our canonical game_version marker.
-        "game_version": "classic" if wcl_flavor in {"fresh", "classic"} else "retail",
+        # WCL no longer exposes gameVersion on Report. We keep ``wcl_flavor``
+        # separately on the Report row to distinguish retail/fresh/classic;
+        # ``game_version`` stays coarse ("retail" vs "classic") for existing
+        # downstream logic and UI labels.
+        "game_version": _flavor_to_game_version(wcl_flavor),
         "start_time": _ms_to_dt(report["startTime"]),
         "end_time": _ms_to_dt(report["endTime"]),
         "fights": fights,

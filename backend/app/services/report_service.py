@@ -15,7 +15,7 @@ from app.models import (
     ReportPlayer,
     ReportPlayerGear,
 )
-from app.services.wcl.client import WclClient, create_wcl_client
+from app.services.wcl.client import WclClient, create_wcl_client, normalize_wcl_flavor, to_client_flavor
 from app.services.wcl.parser import (
     aggregate_boss_casts,
     parse_damage_done_table,
@@ -198,14 +198,12 @@ async def run_report_import(
     code = report.wcl_code
     owner_user_id = report.owner_user_id
     own_client = wcl_client is None
-    flavor = (report.wcl_flavor or "retail").lower()
-    if flavor not in {"retail", "fresh", "classic"}:
-        flavor = "retail"
+    flavor = normalize_wcl_flavor(report.wcl_flavor)
     if wcl_client is None and owner_user_id is not None:
         from app.services.wcl_oauth_service import build_user_wcl_client
 
         wcl_client = await build_user_wcl_client(session, user_id=owner_user_id, flavor=flavor)
-    client = wcl_client or create_wcl_client(flavor=flavor)
+    client = wcl_client or create_wcl_client(flavor=to_client_flavor(flavor))
     try:
         overview = parse_report_overview(
             await client.query(REPORT_OVERVIEW, {"code": code}),

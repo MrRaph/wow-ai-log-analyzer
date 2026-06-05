@@ -26,7 +26,12 @@ from app.services.ai.anthropic_provider import AnthropicProvider
 from app.services.ai.base import AiProvider, AiResponse
 from app.services.ai.openai_provider import OpenAiCompatibleProvider
 from app.services.ai.prompts import build_user_prompt, system_prompt_for
-from app.services.wcl.client import WclClient, create_wcl_client
+from app.services.wcl.client import (
+    WclClient,
+    create_wcl_client,
+    normalize_wcl_flavor,
+    to_client_flavor,
+)
 from app.services.wcl.parser import (
     aggregate_mana_recovery,
     parse_aura_table,
@@ -305,9 +310,7 @@ async def _enrich_player_with_aura_and_damage_taken(
         return
 
     user_client: WclClient | None = None
-    flavor = (report.wcl_flavor or "retail").lower()
-    if flavor not in {"retail", "fresh", "classic"}:
-        flavor = "retail"
+    flavor = normalize_wcl_flavor(report.wcl_flavor)
     if requested_by_id is not None:
         try:
             user_client = await build_user_wcl_client(
@@ -317,7 +320,7 @@ async def _enrich_player_with_aura_and_damage_taken(
             )
         except Exception:  # noqa: BLE001
             logger.exception("Failed to build user WCL client; falling back to client_credentials")
-    client = user_client or create_wcl_client(flavor=flavor)
+    client = user_client or create_wcl_client(flavor=to_client_flavor(flavor))
     own = user_client is None  # if we built our own client we must close it
 
     code = report.wcl_code

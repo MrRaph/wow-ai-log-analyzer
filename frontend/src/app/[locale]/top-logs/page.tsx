@@ -132,10 +132,10 @@ function TopLogsView({ locale, user }: { locale: Locale; user: UserOut }) {
             </Select>
           </div>
           <div>
-            <Label>{locale === "de" ? "Quelle" : "Source"}</Label>
+            <Label>{t("topLogs.sourceLabel")}</Label>
             <Select value={wclFlavor} onChange={(e) => setWclFlavor(e.target.value as "retail" | "fresh")}>
-              <option value="retail">Retail (www.warcraftlogs.com)</option>
-              <option value="fresh">Classic Fresh (fresh.warcraftlogs.com)</option>
+              <option value="retail">{t("topLogs.sourceRetail")}</option>
+              <option value="fresh">{t("topLogs.sourceFresh")}</option>
             </Select>
           </div>
           <div className="flex items-end">

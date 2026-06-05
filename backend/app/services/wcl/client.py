@@ -17,7 +17,7 @@ import asyncio
 import logging
 import time
 from collections.abc import Awaitable, Callable
-from typing import Any, Literal
+from typing import Any, Literal, cast
 
 import httpx
 from tenacity import (
@@ -35,6 +35,7 @@ logger = logging.getLogger(__name__)
 
 UserTokenProvider = Callable[[], Awaitable[str]]
 WclFlavor = Literal["retail", "fresh", "classic"]
+WclClientFlavor = Literal["retail", "fresh"]
 
 
 class WclClient:
@@ -151,6 +152,10 @@ class WclClient:
 def _client_credentials_for_flavor(flavor: WclFlavor) -> tuple[str, str]:
     if flavor == "fresh":
         return settings.wcl_fresh_client_id, settings.wcl_fresh_client_secret
+    if flavor == "classic":
+        # classic.warcraftlogs.com currently shares the retail OAuth client
+        # registry and API v2 host in this project setup.
+        return settings.wcl_client_id, settings.wcl_client_secret
     return settings.wcl_client_id, settings.wcl_client_secret
 
 
@@ -161,6 +166,10 @@ def _api_urls_for_flavor(flavor: WclFlavor) -> tuple[str, str, str]:
             settings.wcl_fresh_user_api_url,
             settings.wcl_fresh_oauth_token_url,
         )
+    if flavor == "classic":
+        # Classic-era logs on classic.warcraftlogs.com are routed through the
+        # retail API settings in this app unless fresh endpoints are selected.
+        return settings.wcl_api_url, settings.wcl_user_api_url, settings.wcl_oauth_token_url
     return settings.wcl_api_url, settings.wcl_user_api_url, settings.wcl_oauth_token_url
 
 
@@ -177,3 +186,14 @@ def create_wcl_client(
         token_url=token_url,
         user_token_provider=user_token_provider,
     )
+
+
+def normalize_wcl_flavor(flavor: str | None) -> WclFlavor:
+    f = (flavor or "retail").strip().lower()
+    if f in {"retail", "fresh", "classic"}:
+        return cast(WclFlavor, f)
+    return "retail"
+
+
+def to_client_flavor(flavor: str | None) -> WclClientFlavor:
+    return "fresh" if normalize_wcl_flavor(flavor) == "fresh" else "retail"
