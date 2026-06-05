@@ -344,6 +344,7 @@ export interface AnalysisListItem {
   role_focus: GameRole | null;
   report_id: string;
   report_code: string;
+  wcl_flavor: "retail" | "fresh" | "classic";
   fight_id: string;
   fight_name: string;
   fight_name_localized: string | null;
