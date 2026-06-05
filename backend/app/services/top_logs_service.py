@@ -102,7 +102,7 @@ async def refresh_top_logs_for_spec_encounter(
     re-fetch.
     """
     metric = metric or _metric_for_role(spec.role)
-    flavor = to_client_flavor(wcl_flavor)
+    flavor = normalize_wcl_flavor(wcl_flavor)
     limit = limit or settings.top_logs_limit
     detail_count = detail_count if detail_count is not None else settings.top_logs_detail_count
     own = wcl_client is None
