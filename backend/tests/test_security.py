@@ -33,6 +33,12 @@ def test_jwt_kind_mismatch():
 
 def test_jwt_invalid_signature():
     token = create_token("user-123", kind="access")
-    bad = token[:-2] + ("aa" if not token.endswith("aa") else "bb")
+    # Corrupt the signature by changing the first character of the signature
+    # part, which always has 6 fully significant bits (unlike the last char of
+    # an HS256 signature, which carries only 4 significant bits and can
+    # accidentally encode the same bytes).
+    header, payload, sig = token.rsplit(".", 2)
+    bad_first = "B" if sig[0] != "B" else "C"
+    bad = f"{header}.{payload}.{bad_first}{sig[1:]}"
     with pytest.raises(AuthError):
         decode_token(bad, expected_kind="access")
