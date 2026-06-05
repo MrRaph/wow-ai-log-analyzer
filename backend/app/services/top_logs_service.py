@@ -24,7 +24,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import settings
 from app.models import GameSpec, Role, TopLog
-from app.services.wcl.client import WclClient, create_wcl_client, to_client_flavor
+from app.services.wcl.client import WclClient, create_wcl_client, normalize_wcl_flavor
 from app.services.report_service import fetch_boss_cast_timeline
 from app.services.wcl.parser import (
     composition_from_player_details,
