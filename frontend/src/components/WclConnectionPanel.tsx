@@ -48,17 +48,17 @@ export function WclConnectionPanel({ locale, flavor }: { locale: Locale; flavor:
     onSuccess: () => qc.invalidateQueries({ queryKey: ["wcl-connection", flavor] }),
   });
 
+  const wclParam = search.get("wcl");
   useEffect(() => {
-    const result = search.get("wcl");
-    if (result === callbackSuccess) {
+    if (wclParam === callbackSuccess) {
       setFlash({ kind: "ok", text: t("admin.saved") });
       qc.invalidateQueries({ queryKey: ["wcl-connection", flavor] });
-    } else if (result === "error") {
+    } else if (wclParam === "error") {
       const reason = search.get("reason") ?? "unknown";
       setFlash({ kind: "error", text: t("profile.wclConnectError", { reason }) });
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [search, flavor]);
+  }, [wclParam, flavor]);
 
   const status = statusQ.data;
   const connectedLabel = status?.wcl_user_name

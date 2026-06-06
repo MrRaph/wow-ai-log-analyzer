@@ -135,6 +135,7 @@ async def _ensure_references(
     spec_slug: str,
     encounter_id: int,
     metric: str,
+    wcl_flavor: str = "retail",
 ) -> bool:
     """Synchronously seed top logs for (spec, encounter, metric) so the
     analyser has reference data.
@@ -160,7 +161,7 @@ async def _ensure_references(
     from app.db import async_session_factory
     from app.models import GameSpec
     from app.services.top_logs_service import refresh_top_logs_for_spec_encounter
-    from app.services.wcl.client import WclClient
+    from app.services.wcl.client import create_wcl_client, to_client_flavor
 
     spec = (
         await session.execute(
@@ -173,12 +174,13 @@ async def _ensure_references(
     try:
         async with async_session_factory() as seed_session:
             async with seed_session.begin():
-                async with WclClient() as wcl:
+                async with create_wcl_client(flavor=to_client_flavor(wcl_flavor)) as wcl:
                     rows = await refresh_top_logs_for_spec_encounter(
                         seed_session,
                         spec=spec,
                         encounter_id=encounter_id,
                         metric=metric,
+                        wcl_flavor=wcl_flavor,
                         # ``is_raid`` defaults the difficulty filter; M+
                         # encounters produce empty rankings via the same
                         # path which is fine.
@@ -205,7 +207,13 @@ async def _ensure_references(
 
 
 async def _fetch_top_log_references(
-    session: AsyncSession, *, spec_slug: str, encounter_id: int | None, role: str, limit: int = 5
+    session: AsyncSession,
+    *,
+    spec_slug: str,
+    encounter_id: int | None,
+    role: str,
+    limit: int = 5,
+    wcl_flavor: str = "retail",
 ) -> list[dict[str, Any]]:
     if not encounter_id or not spec_slug:
         return []
@@ -223,6 +231,7 @@ async def _fetch_top_log_references(
             TopLog.spec_slug == spec_slug,
             TopLog.encounter_id == encounter_id,
             TopLog.metric == metric,
+            TopLog.wcl_flavor == wcl_flavor,
             TopLog.detail_payload.is_not(None),
         )
         .order_by(TopLog.rank.asc())
@@ -732,8 +741,13 @@ async def request_analysis(
     except Exception:  # noqa: BLE001
         logger.exception("Player enrichment failed; continuing with what we have")
 
+    report_flavor = normalize_wcl_flavor(report.wcl_flavor)
     references = await _fetch_top_log_references(
-        session, spec_slug=player.spec_slug, encounter_id=fight.encounter_id, role=role_focus
+        session,
+        spec_slug=player.spec_slug,
+        encounter_id=fight.encounter_id,
+        role=role_focus,
+        wcl_flavor=report_flavor,
     )
 
     # If no reference data is cached for this (spec, encounter, metric),
@@ -747,6 +761,7 @@ async def request_analysis(
             spec_slug=player.spec_slug,
             encounter_id=int(fight.encounter_id),
             metric=metric_for_seed,
+            wcl_flavor=report_flavor,
         )
         if seeded:
             references = await _fetch_top_log_references(
@@ -754,6 +769,7 @@ async def request_analysis(
                 spec_slug=player.spec_slug,
                 encounter_id=fight.encounter_id,
                 role=role_focus,
+                wcl_flavor=report_flavor,
             )
 
     if not references:
