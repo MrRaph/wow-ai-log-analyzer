@@ -92,6 +92,7 @@ function ProfileView({ user, locale }: { user: UserOut; locale: Locale }) {
             <Select value={chosenLocale} onChange={(e) => setChosenLocale(e.target.value)}>
               <option value="en">{t("common.english")}</option>
               <option value="de">{t("common.german")}</option>
+              <option value="fr">{t("common.french")}</option>
             </Select>
           </div>
           <div className="grid gap-3 md:grid-cols-2">
