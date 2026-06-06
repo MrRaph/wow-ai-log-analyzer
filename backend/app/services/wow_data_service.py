@@ -1,6 +1,6 @@
 """Import + cache localized WoW game data from wago.tools.
 
-We pull three DBC tables, EN+DE locales each, and upsert into
+We pull three DBC tables, EN+DE+FR locales each, and upsert into
 ``wow_localizations``:
 
 - ``SpellName`` → kind=``spell`` (covers spells, talents and boss abilities)
@@ -31,7 +31,7 @@ from app.models import WowDataImport, WowImportStatus, WowLocalization
 logger = logging.getLogger(__name__)
 
 WAGO_BASE = "https://wago.tools"
-LOCALES: tuple[tuple[str, str], ...] = (("en", "enUS"), ("de", "deDE"))
+LOCALES: tuple[tuple[str, str], ...] = (("en", "enUS"), ("de", "deDE"), ("fr", "frFR"))
 
 # Every ``kind`` value ``run_full_import`` emits into ``wow_localizations``.
 # Consumed by ``workers.tasks.wow_data.refresh_wow_data`` so that "build
@@ -440,7 +440,12 @@ async def _import_talents(
         # TraitSubTree). Prefix the localised name with "Hero-Talente:"
         # so the AI doesn't confuse a tree pick (one selection per
         # spec) with an individual talent node.
-        hero_tree_label = "Hero-Talents" if locale_short == "en" else "Heldentalente"
+        if locale_short == "en":
+            hero_tree_label = "Hero-Talents"
+        elif locale_short == "fr":
+            hero_tree_label = "Talents héroïques"
+        else:
+            hero_tree_label = "Heldentalente"
         hero_emitted = 0
         for eid, stid in entry_to_subtree.items():
             name = subtree_names.get(stid)
@@ -789,7 +794,7 @@ async def lookup_names(
     "Festermight"). If the talent cache is missing or has no row for a given
     ID, we'd rather emit no name at all and let the AI know it can't cite it.
     """
-    if locale not in {"en", "de"}:
+    if locale not in {"en", "de", "fr"}:
         locale = "en"
     spell_ids = list({int(x) for x in spell_ids if x})
     item_ids = list({int(x) for x in item_ids if x})
@@ -858,7 +863,7 @@ async def resolve_encounter_names_with_fallback(
     ID lookup first and fall back to a name match against the English DBC
     table for anything that didn't resolve.
     """
-    if locale not in {"en", "de"}:
+    if locale not in {"en", "de", "fr"}:
         locale = "en"
 
     out: dict[int, str] = {}

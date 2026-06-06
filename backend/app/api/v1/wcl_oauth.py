@@ -63,7 +63,7 @@ async def _wcl_oauth_callback(
         params = urlencode({"wcl": "error", "reason": exc.__class__.__name__})
         return RedirectResponse(url=f"{base}/en/profile?{params}", status_code=302)
 
-    locale = user.locale if user.locale in {"en", "de"} else "en"
+    locale = user.locale if user.locale in {"en", "de", "fr"} else "en"
     result = "connected-fresh" if flavor == "fresh" else "connected"
     return RedirectResponse(url=f"{base}/{locale}/profile?wcl={result}", status_code=302)
 
