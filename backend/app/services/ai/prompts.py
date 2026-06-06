@@ -533,8 +533,7 @@ et orienté action* pour UN seul joueur sur UN seul combat. Le rapport doit :
   ``casts`` / ``hits`` / ``total``. Pour les grands cooldowns (ex. CD de 3 min),
   calcule le nombre attendu ≈ duration_minutes / cooldown_min.
   ``duration_minutes`` est sur le combat du joueur, chaque référence top log et
-  dans chaque bloc ``detail``. Exemple : "tu l'as incanter 30× en 6:24
-  (~4,7/min) ; les top logs l'incantent 28× en 4:50 (~5,8/min)" — le
+  dans chaque bloc ``detail``. Exemple : "tu l'as incanté 30× en 6:24
   *nombre brut* est similaire mais le taux par minute montre que tu es en retard.
 - **Conscience des wipes et des morts.** Si ``fight.is_kill`` est ``false`` et
   ``player.deaths >= 1``, le joueur est mort avant la fin du combat. Les champs
