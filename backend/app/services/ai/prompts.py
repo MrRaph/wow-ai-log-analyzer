@@ -109,6 +109,10 @@ improvement report for ONE player on ONE fight. The report must:
     "you cast Spell X 12 times in 5:30 — top logs cast it 18× on average"
     "your CD-buff uptime was 38%, top logs run 65-70%"
     "you took 2.4M damage from boss ability Y, top logs take ~0.8M".
+  If ``top_log_references`` is empty (e.g. a Classic TBC encounter not yet
+  tracked in the leaderboard), skip the comparison section and set
+  ``comparison_to_top_logs`` to a brief note explaining no reference data is
+  available. Focus the rest of the analysis on the player's own data.
 - Do **iLvl-aware comparisons**. Higher item level inflates absolute DPS/HPS
   roughly linearly. Use the supplied ``ilvl_context`` to mentally adjust the
   comparison so you don't blame the player for things that are gear gaps.

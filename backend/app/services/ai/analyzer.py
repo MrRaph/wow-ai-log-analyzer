@@ -743,12 +743,6 @@ async def request_analysis(
         logger.exception("Player enrichment failed; continuing with what we have")
 
     report_flavor = normalize_wcl_flavor(report.wcl_flavor)
-    logger.warning(
-        "DEBUG request_analysis: spec_slug=%r encounter_id=%r flavor=%s",
-        player.spec_slug,
-        fight.encounter_id,
-        report_flavor,
-    )
     references = await _fetch_top_log_references(
         session,
         spec_slug=player.spec_slug,
@@ -779,11 +773,14 @@ async def request_analysis(
                 wcl_flavor=report_flavor,
             )
 
-    if not references:
+    if not references and fight.encounter_id is not None:
         # Without references the AI's advice would be hand-waving rather
         # than concrete deltas — refuse the request explicitly so the user
         # knows to retry once WCL has data, instead of getting a generic
         # critique that they might mistake for a real comparison.
+        # Exception: if encounter_id is None (e.g. TBC Classic Fresh fights
+        # that WCL doesn't assign a tracked encounter ID), we proceed without
+        # references rather than blocking the analysis entirely.
         raise NoTopLogsError(
             "No public Warcraft Logs entries are available for this spec on "
             "this boss yet. Try again in a few days once more public logs "
