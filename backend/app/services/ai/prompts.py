@@ -625,8 +625,7 @@ et orienté action* pour UN seul joueur sur UN seul combat. Le rapport doit :
   du joueur (avec ``casts_per_minute``) comme référence croisée. Formule
   l'observation autour du cast parent, pas de l'aura résultante. Exemple
   incorrect : "L'uptime d'Infusion secrète est à 55% vs. top 75%". Exemple
-  correct : "Thé de concentration du tonnerre incanter 11× en 6:24 (~1,7/min
-  vs. top ~2,3/min) — son buff Infusion secrète est donc à 55% d'uptime au
+  correct : "Thé de concentration du tonnerre incanté 11× en 6:24 (~1,7/min
   lieu des 75% des top logs." Si tu ne peux vraiment pas identifier le cast
   parent dans les données, écris "sort source non présent dans le snapshot de
   casts" et évite de deviner — n'**invente pas** de relation cast→buff.
