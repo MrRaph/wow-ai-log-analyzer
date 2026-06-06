@@ -8,7 +8,7 @@ from __future__ import annotations
 
 from fastapi import Header
 
-SUPPORTED_LOCALES = ("en", "de")
+SUPPORTED_LOCALES = ("en", "de", "fr")
 DEFAULT_LOCALE = "en"
 
 
