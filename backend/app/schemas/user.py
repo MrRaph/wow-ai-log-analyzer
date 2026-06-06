@@ -24,14 +24,14 @@ class UserOut(BaseModel):
 
 class UserUpdateMe(BaseModel):
     display_name: str | None = Field(default=None, min_length=1, max_length=80)
-    locale: str | None = Field(default=None, pattern=r"^(en|de)$")
+    locale: str | None = Field(default=None, pattern=r"^(en|de|fr)$")
     current_password: str | None = None
     new_password: str | None = Field(default=None, min_length=8, max_length=128)
 
 
 class InviteIn(BaseModel):
     email: EmailStr
-    locale: str = Field(default="en", pattern=r"^(en|de)$")
+    locale: str = Field(default="en", pattern=r"^(en|de|fr)$")
 
 
 class InviteOut(BaseModel):

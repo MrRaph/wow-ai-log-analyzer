@@ -1,4 +1,4 @@
-export const LOCALES = ["en", "de"] as const;
+export const LOCALES = ["en", "de", "fr"] as const;
 export type Locale = (typeof LOCALES)[number];
 
 /** Reads ``process.env.DEFAULT_LOCALE`` AT CALL TIME so the standalone
@@ -17,7 +17,9 @@ export function isLocale(value: string | undefined | null): value is Locale {
   return !!value && (LOCALES as readonly string[]).includes(value);
 }
 
-/** Wowhead uses "www" for English and "de" for German. */
+/** Wowhead uses "www" for English, "de" for German, "fr" for French. */
 export function wowheadHost(locale: Locale): string {
-  return locale === "de" ? "de" : "www";
+  if (locale === "de") return "de";
+  if (locale === "fr") return "fr";
+  return "www";
 }

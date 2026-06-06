@@ -107,6 +107,7 @@ export function Header({ locale }: { locale: Locale }) {
           >
             <option value="en">{t("common.english")}</option>
             <option value="de">{t("common.german")}</option>
+            <option value="fr">{t("common.french")}</option>
           </Select>
           {user && (
             <Button variant="ghost" size="sm" onClick={logout}>

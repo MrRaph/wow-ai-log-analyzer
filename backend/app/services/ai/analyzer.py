@@ -1045,7 +1045,7 @@ async def request_analysis(
         session.add(analysis)
     await session.flush()
     user_prompt = build_user_prompt(
-        locale=locale if locale in ("en", "de") else "en",  # type: ignore[arg-type]
+        locale=locale if locale in ("en", "de", "fr") else "en",  # type: ignore[arg-type]
         role_focus=role_focus,  # type: ignore[arg-type]
         fight_summary=fight_summary,
         player_summary=player_summary,
@@ -1055,7 +1055,7 @@ async def request_analysis(
         ilvl_context=_ilvl_context(player.item_level, references),
         localized_names=localized_names,
     )
-    sys_prompt = system_prompt_for("de" if locale == "de" else "en")
+    sys_prompt = system_prompt_for(locale if locale in {"en", "de", "fr"} else "en")
 
     try:
         response: AiResponse = await used_provider.generate_structured(
