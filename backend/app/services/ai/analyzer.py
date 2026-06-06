@@ -169,6 +169,7 @@ async def _ensure_references(
         )
     ).scalar_one_or_none()
     if not spec:
+        logger.warning("_ensure_references: unknown spec_slug=%r (flavor=%s) — no top-log seed possible", spec_slug, wcl_flavor)
         return False
 
     try:
