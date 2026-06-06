@@ -30,10 +30,13 @@ from app.models.base import Base, TimestampMixin
 
 class Report(Base, TimestampMixin):
     __tablename__ = "reports"
-    __table_args__ = (UniqueConstraint("wcl_code", name="uq_reports_wcl_code"),)
+    __table_args__ = (
+        UniqueConstraint("wcl_code", "wcl_flavor", name="uq_reports_wcl_code_flavor"),
+    )
 
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     wcl_code: Mapped[str] = mapped_column(String(32), nullable=False, index=True)
+    wcl_flavor: Mapped[str] = mapped_column(String(16), nullable=False, default="retail")
     title: Mapped[str] = mapped_column(String(255), nullable=False, default="")
     owner_user_id: Mapped[uuid.UUID | None] = mapped_column(
         UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"), nullable=True, index=True

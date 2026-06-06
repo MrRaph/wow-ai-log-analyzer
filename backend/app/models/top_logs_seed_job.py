@@ -40,3 +40,4 @@ class TopLogsSeedJob(Base, TimestampMixin):
     started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     finished_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     error: Mapped[str | None] = mapped_column(Text, nullable=True)
+    wcl_flavor: Mapped[str] = mapped_column(String(16), nullable=False, server_default="retail", default="retail")

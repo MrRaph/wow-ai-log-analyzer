@@ -161,9 +161,13 @@ async def get_report(
 
 @router.get("/by-code/{code}", response_model=ReportOut)
 async def get_report_by_code(
-    code: str, session: SessionDep, user: CurrentUser, locale: LocaleDep
+    code: str,
+    session: SessionDep,
+    user: CurrentUser,
+    locale: LocaleDep,
+    wcl_flavor: str = Query(default="retail", pattern=r"^(retail|fresh|classic)$"),
 ) -> ReportOut:
-    report = await report_service.get_report(session, code=code)
+    report = await report_service.get_report(session, code=code, wcl_flavor=wcl_flavor)
     _assert_report_visible(report, user)
     name_map = await _localize_fight_names(session, report, user.locale or locale)
     return _serialize_report(report, name_map)

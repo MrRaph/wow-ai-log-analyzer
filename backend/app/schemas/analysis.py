@@ -131,6 +131,7 @@ class AnalysisListItem(BaseModel):
     # Just enough to render the list row
     report_id: uuid.UUID
     report_code: str
+    wcl_flavor: str
     fight_id: uuid.UUID
     fight_name: str = ""
     fight_name_localized: str | None = None
@@ -152,6 +153,7 @@ class TopLogOut(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
     id: uuid.UUID
+    wcl_flavor: str
     spec_slug: str
     encounter_id: int
     encounter_name: str

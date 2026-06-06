@@ -22,6 +22,7 @@ class TopLog(Base, TimestampMixin):
     spec_slug: Mapped[str] = mapped_column(
         ForeignKey("game_specs.slug", ondelete="CASCADE"), nullable=False, index=True
     )
+    wcl_flavor: Mapped[str] = mapped_column(String(16), nullable=False, default="retail")
     encounter_id: Mapped[int] = mapped_column(Integer, nullable=False, index=True)
     encounter_name: Mapped[str] = mapped_column(String(128), default="", nullable=False)
     difficulty: Mapped[int | None] = mapped_column(Integer, nullable=True)

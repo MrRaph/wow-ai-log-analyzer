@@ -1,4 +1,4 @@
-"""Discover the current retail raid encounters via the WCL ``worldData.zones`` API.
+"""Discover the current raid encounters via the WCL ``worldData.zones`` API.
 
 WCL's zones list is the canonical source for "what is current content" — it
 includes every raid tier across every expansion, with their encounter IDs.
@@ -6,8 +6,8 @@ We pick the heaviest expansion id (latest) and the non-frozen raid zone(s)
 within it. ``frozen=true`` means WCL has stopped accepting new logs for the
 zone (i.e. tier is over); we always skip those.
 
-The result is cached in-memory for the lifetime of the process: zone-list
-churn is on the order of new patches (months), so even a long-running
+The result is cached in-memory per flavor for the lifetime of the process:
+zone-list churn is on the order of new patches (months), so even a long-running
 worker doesn't need to re-fetch.
 """
 from __future__ import annotations
@@ -15,7 +15,7 @@ from __future__ import annotations
 import logging
 from dataclasses import dataclass
 
-from app.services.wcl.client import WclClient
+from app.services.wcl.client import WclClient, create_wcl_client, to_client_flavor
 from app.services.wcl.queries import WORLD_ZONES
 
 logger = logging.getLogger(__name__)
@@ -31,13 +31,14 @@ class CurrentRaidEncounter:
     expansion_name: str
 
 
-_cached: list[CurrentRaidEncounter] | None = None
+# Per-flavor cache: {"retail": [...], "fresh": [...]}
+_cached: dict[str, list[CurrentRaidEncounter]] = {}
 
 
 async def fetch_current_raid_encounters(
-    *, force_refresh: bool = False, wcl_client: WclClient | None = None
+    *, force_refresh: bool = False, wcl_client: WclClient | None = None, wcl_flavor: str = "retail"
 ) -> list[CurrentRaidEncounter]:
-    """Return the raid encounters of the current retail tier.
+    """Return the raid encounters of the current tier for the given flavor.
 
     A "raid zone" is one that is not frozen and contains at least 5 encounters
     — that filter is enough to drop dungeon zones (M+ has its own zones with
@@ -45,12 +46,12 @@ async def fetch_current_raid_encounters(
     "Open World" zones with handful of bosses; we additionally pick zones
     from the highest expansion id only, which excludes those edge cases).
     """
-    global _cached
-    if _cached is not None and not force_refresh:
-        return _cached
+    flavor_key = wcl_flavor if wcl_flavor in ("retail", "fresh") else "retail"
+    if flavor_key in _cached and not force_refresh:
+        return _cached[flavor_key]
 
     own_client = wcl_client is None
-    client = wcl_client or WclClient()
+    client = wcl_client or create_wcl_client(flavor=to_client_flavor(flavor_key))
     try:
         payload = await client.query(WORLD_ZONES, {})
     finally:
@@ -59,9 +60,9 @@ async def fetch_current_raid_encounters(
 
     zones = ((payload or {}).get("worldData") or {}).get("zones") or []
     if not zones:
-        logger.warning("WCL returned no zones; current-tier discovery disabled")
-        _cached = []
-        return _cached
+        logger.warning("WCL returned no zones; current-tier discovery disabled for flavor=%s", flavor_key)
+        _cached[flavor_key] = []
+        return _cached[flavor_key]
 
     # Highest expansion id == latest expansion. WCL increments these
     # monotonically with each new expansion.
@@ -111,15 +112,22 @@ async def fetch_current_raid_encounters(
             )
 
     logger.info(
-        "current retail raid: expansion=%s, %d encounters",
+        "current %s raid: expansion=%s, %d encounters",
+        flavor_key,
         latest_expansion_id,
         len(out),
     )
-    _cached = out
+    _cached[flavor_key] = out
     return out
 
 
-def clear_cache() -> None:
-    """Reset the in-memory cache. Used by tests + /refresh-cache admin endpoints."""
-    global _cached
-    _cached = None
+def clear_cache(wcl_flavor: str | None = None) -> None:
+    """Reset the in-memory cache. Used by tests + /refresh-cache admin endpoints.
+
+    Pass wcl_flavor to clear only that flavor; omit to clear all.
+    """
+    if wcl_flavor is not None:
+        flavor_key = wcl_flavor if wcl_flavor in ("retail", "fresh") else "retail"
+        _cached.pop(flavor_key, None)
+    else:
+        _cached.clear()

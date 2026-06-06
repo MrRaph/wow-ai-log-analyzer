@@ -28,6 +28,22 @@ import type {
   UserAiConfig,
 } from "@/types/api";
 
+type WclFlavor = "retail" | "fresh" | "classic";
+
+const FLAVOR_LABELS: Record<WclFlavor, string> = {
+  retail: "Retail",
+  fresh: "Fresh",
+  classic: "Classic",
+};
+
+function FlavorBadge({ flavor }: { flavor: WclFlavor }) {
+  return (
+    <span className="inline-flex items-center rounded border border-bg-3 bg-bg-2 px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-zinc-300">
+      {FLAVOR_LABELS[flavor]}
+    </span>
+  );
+}
+
 export default function AnalyzePage({ params }: { params: Promise<{ locale: Locale }> }) {
   const { locale } = use(params);
   return <AuthGuard locale={locale}>{() => <AnalyzeView locale={locale} />}</AuthGuard>;
@@ -266,6 +282,9 @@ function AnalyzeView({ locale }: { locale: Locale }) {
                   <div className="min-w-0 flex-1">
                     <p className="text-sm text-zinc-100">
                       {r.title || r.zone_name || r.wcl_code}
+                      <span className="ml-2 align-middle">
+                        <FlavorBadge flavor={r.wcl_flavor} />
+                      </span>
                       {r.import_status === "importing" && (
                         <span className="ml-2 inline-block h-2 w-2 animate-pulse rounded-full bg-accent" />
                       )}
@@ -391,6 +410,12 @@ function ReportView({
 }) {
   const [fightId, setFightId] = useState<string | null>(report.fights[0]?.id ?? null);
   const fight = report.fights.find((f) => f.id === fightId) ?? report.fights[0];
+  const reportBase =
+    report.wcl_flavor === "fresh"
+      ? "https://fresh.warcraftlogs.com"
+      : report.wcl_flavor === "classic"
+        ? "https://classic.warcraftlogs.com"
+        : "https://www.warcraftlogs.com";
   return (
     <div className="space-y-4">
       <Card>
@@ -399,11 +424,11 @@ function ReportView({
             <h2 className="text-lg font-semibold">{report.title || report.zone_name}</h2>
             <p className="text-xs text-zinc-500">
               <a
-                href={`https://www.warcraftlogs.com/reports/${report.wcl_code}`}
+                href={`${reportBase}/reports/${report.wcl_code}`}
                 target="_blank"
                 rel="noopener noreferrer"
               >
-                warcraftlogs.com/reports/{report.wcl_code}
+                {reportBase.replace("https://", "")}/reports/{report.wcl_code}
               </a>
             </p>
           </div>
@@ -865,6 +890,7 @@ function RecentAnalysesPanel({
                     <ClassBadge cls={cls} spec={spec} locale={locale} />
                     <span className="text-zinc-500">·</span>
                     <span className="text-zinc-300">{fightLabel}</span>
+                    <FlavorBadge flavor={a.wcl_flavor} />
                     <span
                       className={`ml-2 text-xs font-semibold ${severityColor(
                         a.status,

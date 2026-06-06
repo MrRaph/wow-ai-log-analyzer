@@ -123,7 +123,10 @@ function ProfileView({ user, locale }: { user: UserOut; locale: Locale }) {
         </form>
       </Card>
       <Suspense fallback={null}>
-        <WclConnectionPanel locale={locale} />
+        <div className="space-y-4">
+          <WclConnectionPanel locale={locale} flavor="retail" />
+          <WclConnectionPanel locale={locale} flavor="fresh" />
+        </div>
       </Suspense>
       <UserAiConfigPanel />
       <Card className="border-red-500/30">

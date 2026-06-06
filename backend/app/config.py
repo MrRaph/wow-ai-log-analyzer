@@ -55,6 +55,14 @@ class Settings(BaseSettings):
     # Local dev:  http://localhost:8000/api/v1/auth/wcl/callback
     wcl_redirect_uri: str = "http://localhost:8000/api/v1/auth/wcl/callback"
     wcl_oauth_scope: str = "view-user-profile"
+    wcl_fresh_client_id: str = ""
+    wcl_fresh_client_secret: str = ""
+    wcl_fresh_api_url: str = "https://fresh.warcraftlogs.com/api/v2/client"
+    wcl_fresh_user_api_url: str = "https://fresh.warcraftlogs.com/api/v2/user"
+    wcl_fresh_oauth_token_url: str = "https://fresh.warcraftlogs.com/oauth/token"
+    wcl_fresh_oauth_authorize_url: str = "https://fresh.warcraftlogs.com/oauth/authorize"
+    wcl_fresh_redirect_uri: str = "http://localhost:8000/api/v1/auth/wcl-fresh/callback"
+    wcl_fresh_oauth_scope: str = "view-user-profile"
 
     # --- Battle.net (Blizzard) ---
     # Authoritative source for any WoW character's public profile data
@@ -174,6 +182,10 @@ class Settings(BaseSettings):
     # data for (casts, gear, buffs, talents, damage taken). Less than top_logs_limit
     # because detailed fetch is expensive.
     top_logs_detail_count: int = 5
+    # Gates all Fresh (fresh.warcraftlogs.com) top-logs features: public API listing,
+    # refresh endpoint, admin seeding, and weekly cron. Does NOT affect Classic Era
+    # (classic.warcraftlogs.com), which shares the retail OAuth credentials.
+    top_logs_fresh_enabled: bool = False
 
     # --- Initial admin ---
     initial_admin_email: EmailStr = "admin@example.com"

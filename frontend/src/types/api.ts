@@ -191,6 +191,7 @@ export type ReportImportStatus = "importing" | "ready" | "failed";
 export interface Report {
   id: string;
   wcl_code: string;
+  wcl_flavor: "retail" | "fresh" | "classic";
   title: string;
   zone_id: number | null;
   zone_name: string;
@@ -206,6 +207,7 @@ export interface Report {
 export interface ReportSummary {
   id: string;
   wcl_code: string;
+  wcl_flavor: "retail" | "fresh" | "classic";
   title: string;
   zone_name: string;
   start_time: string | null;
@@ -342,6 +344,7 @@ export interface AnalysisListItem {
   role_focus: GameRole | null;
   report_id: string;
   report_code: string;
+  wcl_flavor: "retail" | "fresh" | "classic";
   fight_id: string;
   fight_name: string;
   fight_name_localized: string | null;
@@ -354,6 +357,7 @@ export interface AnalysisListItem {
 
 export interface TopLog {
   id: string;
+  wcl_flavor: "retail" | "fresh" | "classic";
   spec_slug: string;
   encounter_id: number;
   encounter_name: string;
@@ -398,6 +402,7 @@ export interface AdminSettings {
 
 export interface WclConnectionStatus {
   connected: boolean;
+  flavor?: "retail" | "fresh" | "classic";
   wcl_user_id?: number | null;
   wcl_user_name?: string;
   expires_at?: string | null;
@@ -406,6 +411,7 @@ export interface WclConnectionStatus {
 
 export interface WclAuthorizationStart {
   authorization_url: string;
+  flavor?: "retail" | "fresh" | "classic";
 }
 
 export interface WowDataImport {

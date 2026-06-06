@@ -93,6 +93,7 @@ class ReportOut(BaseModel):
 
     id: uuid.UUID
     wcl_code: str
+    wcl_flavor: str
     title: str
     zone_id: int | None
     zone_name: str
@@ -119,6 +120,7 @@ class ReportSummaryOut(BaseModel):
     model_config = ConfigDict(from_attributes=True)
     id: uuid.UUID
     wcl_code: str
+    wcl_flavor: str
     title: str
     zone_name: str
     start_time: datetime | None

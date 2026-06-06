@@ -258,6 +258,7 @@ async def list_my_analyses(
                 ),
                 report_id=a.report_id,
                 report_code=rep.wcl_code if rep else "",
+                wcl_flavor=rep.wcl_flavor if rep else "retail",
                 fight_id=a.fight_id,
                 fight_name=f.name if f else "",
                 fight_name_localized=(

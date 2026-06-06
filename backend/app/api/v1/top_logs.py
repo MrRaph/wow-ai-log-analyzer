@@ -4,7 +4,8 @@ from __future__ import annotations
 from fastapi import APIRouter, Query, status
 from sqlalchemy import select
 
-from app.core.errors import NotFoundError
+from app.config import settings
+from app.core.errors import NotFoundError, ValidationAppError
 from app.deps import AdminUser, CurrentUser, LocaleDep, SessionDep
 from app.models import GameSpec
 from app.schemas.analysis import TopLogOut
@@ -22,9 +23,16 @@ async def list_top_logs(
     spec_slug: str = Query(..., description="GameSpec slug, e.g. 'priest_holy'"),
     encounter_id: int | None = Query(default=None),
     metric: str | None = Query(default=None, pattern=r"^(dps|hps)$"),
+    wcl_flavor: str = Query(default="retail", pattern=r"^(retail|fresh|classic)$"),
 ) -> list[TopLogOut]:
+    if wcl_flavor == "fresh" and not settings.top_logs_fresh_enabled:
+        return []
     rows = await top_logs_service.list_top_logs(
-        session, spec_slug=spec_slug, encounter_id=encounter_id, metric=metric
+        session,
+        spec_slug=spec_slug,
+        encounter_id=encounter_id,
+        metric=metric,
+        wcl_flavor=wcl_flavor,
     )
     pairs = list({(r.encounter_id, r.encounter_name) for r in rows})
     name_map = await resolve_encounter_names_with_fallback(
@@ -45,14 +53,21 @@ async def refresh_top_logs(
     session: SessionDep,
     _: AdminUser,
     metric: str | None = Query(default=None, pattern=r"^(dps|hps)$"),
+    wcl_flavor: str = Query(default="retail", pattern=r"^(retail|fresh|classic)$"),
 ) -> dict[str, int]:
+    if wcl_flavor == "fresh" and not settings.top_logs_fresh_enabled:
+        raise ValidationAppError("Fresh top logs are disabled on this server.")
     spec = (
         await session.execute(select(GameSpec).where(GameSpec.slug == spec_slug))
     ).scalar_one_or_none()
     if not spec:
         raise NotFoundError(f"Unknown spec_slug: {spec_slug}")
     rows = await top_logs_service.refresh_top_logs_for_spec_encounter(
-        session, spec=spec, encounter_id=encounter_id, metric=metric
+        session,
+        spec=spec,
+        encounter_id=encounter_id,
+        metric=metric,
+        wcl_flavor=wcl_flavor,
     )
     await session.commit()
     return {"refreshed": len(rows)}

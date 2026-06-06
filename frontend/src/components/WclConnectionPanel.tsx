@@ -11,20 +11,25 @@ import { formatDateTime } from "@/lib/format";
 import type { Locale } from "@/i18n/config";
 import type { WclAuthorizationStart, WclConnectionStatus } from "@/types/api";
 
-export function WclConnectionPanel({ locale }: { locale: Locale }) {
+type WclFlavor = "retail" | "fresh";
+
+export function WclConnectionPanel({ locale, flavor }: { locale: Locale; flavor: WclFlavor }) {
   const t = useTranslations();
   const qc = useQueryClient();
   const search = useSearchParams();
   const [flash, setFlash] = useState<{ kind: "ok" | "error"; text: string } | null>(null);
 
   const statusQ = useQuery({
-    queryKey: ["wcl-connection"],
-    queryFn: () => apiFetch<WclConnectionStatus>("/api/v1/users/me/wcl-connection"),
+    queryKey: ["wcl-connection", flavor],
+    queryFn: () =>
+      apiFetch<WclConnectionStatus>(`/api/v1/users/me/wcl-connection?flavor=${flavor}`),
   });
 
+  const startPath = flavor === "fresh" ? "/api/v1/auth/wcl-fresh/start" : "/api/v1/auth/wcl/start";
+  const callbackSuccess = flavor === "fresh" ? "connected-fresh" : "connected";
+
   const startMut = useMutation({
-    mutationFn: () =>
-      apiFetch<WclAuthorizationStart>("/api/v1/auth/wcl/start", { method: "POST" }),
+    mutationFn: () => apiFetch<WclAuthorizationStart>(startPath, { method: "POST" }),
     onSuccess: (data) => {
       window.location.href = data.authorization_url;
     },
@@ -39,31 +44,35 @@ export function WclConnectionPanel({ locale }: { locale: Locale }) {
   });
 
   const disconnectMut = useMutation({
-    mutationFn: () => apiFetch("/api/v1/users/me/wcl-connection", { method: "DELETE" }),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ["wcl-connection"] }),
+    mutationFn: () => apiFetch(`/api/v1/users/me/wcl-connection?flavor=${flavor}`, { method: "DELETE" }),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["wcl-connection", flavor] }),
   });
 
+  const wclParam = search.get("wcl");
   useEffect(() => {
-    const result = search.get("wcl");
-    if (result === "connected") {
+    if (wclParam === callbackSuccess) {
       setFlash({ kind: "ok", text: t("admin.saved") });
-      qc.invalidateQueries({ queryKey: ["wcl-connection"] });
-    } else if (result === "error") {
+      qc.invalidateQueries({ queryKey: ["wcl-connection", flavor] });
+    } else if (wclParam === "error") {
       const reason = search.get("reason") ?? "unknown";
       setFlash({ kind: "error", text: t("profile.wclConnectError", { reason }) });
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [search]);
+  }, [wclParam, flavor]);
 
   const status = statusQ.data;
   const connectedLabel = status?.wcl_user_name
     ? t("profile.wclConnectedAs", { name: status.wcl_user_name })
     : t("profile.wclConnectedNoName");
+  const sectionTitle =
+    flavor === "fresh" ? t("profile.wclFreshSection") : t("profile.wclSection");
+  const sectionHelp =
+    flavor === "fresh" ? t("profile.wclFreshSectionHelp") : t("profile.wclSectionHelp");
 
   return (
     <Card>
-      <h2 className="mb-2 font-semibold">{t("profile.wclSection")}</h2>
-      <p className="mb-3 text-sm text-zinc-400">{t("profile.wclSectionHelp")}</p>
+      <h2 className="mb-2 font-semibold">{sectionTitle}</h2>
+      <p className="mb-3 text-sm text-zinc-400">{sectionHelp}</p>
 
       {flash && (
         <p
