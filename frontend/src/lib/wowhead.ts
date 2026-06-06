@@ -1,6 +1,6 @@
 import type { Locale } from "@/i18n/config";
 
-const HOST: Record<Locale, string> = { en: "www", de: "de" };
+const HOST: Record<Locale, string> = { en: "www", de: "de", fr: "fr" };
 
 export function spellUrl(spellId: number, locale: Locale): string {
   return `https://${HOST[locale]}.wowhead.com/spell=${spellId}`;
@@ -18,5 +18,7 @@ export function itemUrl(itemId: number, locale: Locale, extras?: { ilvl?: number
 
 /** Locale that the wowhead_power.js script should pick up. */
 export function wowheadDataLocale(locale: Locale): string {
-  return locale === "de" ? "de" : "en-us";
+  if (locale === "de") return "de";
+  if (locale === "fr") return "fr";
+  return "en-us";
 }

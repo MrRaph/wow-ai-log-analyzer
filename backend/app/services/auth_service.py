@@ -131,7 +131,7 @@ async def create_invite(
     inviter: User,
     locale: str,
 ) -> Invite:
-    if locale not in {"en", "de"}:
+    if locale not in {"en", "de", "fr"}:
         locale = "en"
     existing_user = (
         await session.execute(select(User).where(User.email == email.lower()))

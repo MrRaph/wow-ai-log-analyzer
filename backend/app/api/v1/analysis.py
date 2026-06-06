@@ -125,7 +125,7 @@ async def list_my_analyses(
     finds the EN-stored fight name.
     """
     user_locale = (user.locale or locale or "en").lower()
-    if user_locale not in {"en", "de"}:
+    if user_locale not in {"en", "de", "fr"}:
         user_locale = "en"
 
     base = (

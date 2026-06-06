@@ -35,7 +35,7 @@ async def public_config(session: SessionDep) -> dict[str, object]:
     active_ai = ai_provider_value.get("value") or settings.ai_provider
     return {
         "app_name": settings.app_name,
-        "supported_locales": ["en", "de"],
+        "supported_locales": ["en", "de", "fr"],
         "default_locale": (os.environ.get("DEFAULT_LOCALE") or "en").lower(),
         "allow_registration": bool(allow_reg_value.get("enabled", settings.allow_registration)),
         # ``ai_enabled = false`` → admin set ``ai_provider=disabled``.
