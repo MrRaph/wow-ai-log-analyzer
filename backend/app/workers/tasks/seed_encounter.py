@@ -21,7 +21,7 @@ from sqlalchemy import select
 from app.db import async_session_factory
 from app.models import GameSpec, TopLogsSeedJob
 from app.services.top_logs_service import refresh_top_logs_for_spec_encounter
-from app.services.wcl.client import WclClient
+from app.services.wcl.client import WclClient, create_wcl_client, to_client_flavor
 
 logger = logging.getLogger(__name__)
 
@@ -50,6 +50,7 @@ async def seed_encounter_task(_ctx: dict, job_id: str) -> None:
                 encounter_id = job.encounter_id
                 is_raid = job.is_raid
                 metric_filter = job.metric_filter
+                wcl_flavor = job.wcl_flavor
 
             # 2) Pre-compute spec list inside its own short transaction so the
             # per-spec begin() blocks below don't fight the session autobegin.
@@ -72,7 +73,7 @@ async def seed_encounter_task(_ctx: dict, job_id: str) -> None:
             # 3) Walk specs. Each spec gets its own transaction so partial
             # progress survives crashes; before each spec we update the
             # ``current_spec_slug`` field so the UI shows where we are.
-            async with WclClient() as wcl:
+            async with create_wcl_client(flavor=to_client_flavor(wcl_flavor)) as wcl:
                 for spec in specs:
                     async with session.begin():
                         tracked = (
@@ -89,6 +90,7 @@ async def seed_encounter_task(_ctx: dict, job_id: str) -> None:
                                 spec=spec,
                                 encounter_id=encounter_id,
                                 is_raid=is_raid,
+                                wcl_flavor=wcl_flavor,
                                 wcl_client=wcl,
                             )
                     except Exception:  # noqa: BLE001

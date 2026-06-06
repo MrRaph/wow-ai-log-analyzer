@@ -50,6 +50,7 @@ class TopLogsSeedIn(BaseModel):
     #   "dps" → only non-healer specs (DPS + tanks)
     # Empty/None → all specs (full refresh, current default).
     metric: Literal["dps", "hps"] | None = None
+    wcl_flavor: Literal["retail", "fresh"] = "retail"
 
 
 class TopLogsSeedJobOut(BaseModel):
@@ -61,6 +62,7 @@ class TopLogsSeedJobOut(BaseModel):
     encounter_name: str
     is_raid: bool
     metric_filter: str | None
+    wcl_flavor: str = "retail"
     total_specs: int
     completed_specs: int
     current_spec_slug: str | None

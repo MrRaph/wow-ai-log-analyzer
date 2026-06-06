@@ -18,8 +18,9 @@ from app.schemas.wow_data import (
     WowDataImportOut,
     WowDataStatusOut,
 )
+from app.config import settings
 from app.services.top_logs_service import refresh_top_logs_for_spec_encounter
-from app.services.wcl.client import WclClient
+from app.services.wcl.client import WclClient, normalize_wcl_flavor
 from app.services.wcl_zones_service import fetch_current_raid_encounters
 from app.services.wow_data_service import (
     fetch_latest_build,
@@ -148,6 +149,7 @@ async def seed_top_logs_for_encounter(
     encounter_id = payload.encounter_id
     is_raid = payload.is_raid
     metric_filter = payload.metric
+    wcl_flavor = normalize_wcl_flavor(payload.wcl_flavor)
 
     # Skip if a job for this encounter is already in flight, so spam-clicking
     # the button doesn't queue 5 redundant runs.
@@ -156,6 +158,7 @@ async def seed_top_logs_for_encounter(
             select(TopLogsSeedJob).where(
                 TopLogsSeedJob.encounter_id == encounter_id,
                 TopLogsSeedJob.metric_filter == metric_filter,
+                TopLogsSeedJob.wcl_flavor == wcl_flavor,
                 TopLogsSeedJob.status.in_(("queued", "running")),
             )
         )
@@ -165,6 +168,7 @@ async def seed_top_logs_for_encounter(
             "queued": False,
             "encounter_id": encounter_id,
             "metric": metric_filter,
+            "wcl_flavor": wcl_flavor,
             "reason": "already_in_flight",
             "job_id": str(active.id),
         }
@@ -186,6 +190,7 @@ async def seed_top_logs_for_encounter(
         encounter_id=encounter_id,
         is_raid=is_raid,
         metric_filter=metric_filter,
+        wcl_flavor=wcl_flavor,
         total_specs=int(spec_count),
         status="queued",
     )
@@ -199,20 +204,24 @@ async def seed_top_logs_for_encounter(
         "encounter_id": encounter_id,
         "is_raid": is_raid,
         "metric": metric_filter,
+        "wcl_flavor": wcl_flavor,
         "spec_count": int(spec_count),
         "job_id": str(job.id),
     }
 
 
 @router.get("/top-logs/current-tier-preview")
-async def preview_current_tier(_: AdminUser) -> dict[str, Any]:
+async def preview_current_tier(
+    _: AdminUser,
+    wcl_flavor: str = Query(default="retail", pattern="^(retail|fresh)$"),
+) -> dict[str, Any]:
     """Show what ``seed-current-tier`` would queue right now, without queuing.
 
     Used by the admin UI so the operator can sanity-check the discovered
     list (expansion picked correctly, all expected raid zones present, no
     M+ noise) before triggering the actual seeding.
     """
-    raid = await fetch_current_raid_encounters(force_refresh=True)
+    raid = await fetch_current_raid_encounters(force_refresh=True, wcl_flavor=wcl_flavor)
     if not raid:
         return {"expansion_id": None, "expansion_name": None, "encounters": []}
     # Group by zone so the UI can render "Manaforge Omega: 8 bosses, …" cards.
@@ -242,18 +251,25 @@ async def preview_current_tier(_: AdminUser) -> dict[str, Any]:
     status_code=status.HTTP_202_ACCEPTED,
 )
 async def seed_current_tier(
-    session: SessionDep, _: AdminUser, arq: ArqDep
+    session: SessionDep,
+    _: AdminUser,
+    arq: ArqDep,
+    wcl_flavor: str = Query(default="retail", pattern="^(retail|fresh)$"),
 ) -> dict[str, Any]:
-    """Discover the current retail raid via WCL and queue a seed-job per encounter.
+    """Discover the current raid tier via WCL and queue a seed-job per encounter.
 
     Idempotent: encounters already covered by an in-flight ``queued``/``running``
     job are skipped, so spamming the button just polls the existing jobs.
+    Pass ``wcl_flavor=fresh`` to seed Fresh encounters.
     """
-    raid = await fetch_current_raid_encounters()
+    flavor = normalize_wcl_flavor(wcl_flavor)
+    if flavor == "fresh" and not settings.top_logs_fresh_enabled:
+        return {"queued": 0, "skipped_already_running": 0, "encounters": [], "reason": "fresh_disabled"}
+    raid = await fetch_current_raid_encounters(wcl_flavor=flavor)
     if not raid:
         return {"queued": 0, "skipped_already_running": 0, "encounters": []}
 
-    # Find encounters that already have an in-flight seed job (any metric).
+    # Find encounters that already have an in-flight seed job (any metric) for this flavor.
     encounter_ids = [r.encounter_id for r in raid]
     active_ids = set(
         (
@@ -263,6 +279,7 @@ async def seed_current_tier(
                     TopLogsSeedJob.encounter_id.in_(encounter_ids),
                     TopLogsSeedJob.status.in_(("queued", "running")),
                     TopLogsSeedJob.metric_filter.is_(None),
+                    TopLogsSeedJob.wcl_flavor == flavor,
                 )
                 .distinct()
             )
@@ -282,6 +299,7 @@ async def seed_current_tier(
             encounter_name=enc.encounter_name,
             is_raid=True,
             metric_filter=None,
+            wcl_flavor=flavor,
             total_specs=0,
             status="queued",
         )

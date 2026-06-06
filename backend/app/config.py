@@ -182,6 +182,9 @@ class Settings(BaseSettings):
     # data for (casts, gear, buffs, talents, damage taken). Less than top_logs_limit
     # because detailed fetch is expensive.
     top_logs_detail_count: int = 5
+    # Gates all Fresh (fresh.warcraftlogs.com) top-logs features: public API listing,
+    # refresh endpoint, admin seeding, and weekly cron. Does NOT affect Classic Era
+    # (classic.warcraftlogs.com), which shares the retail OAuth credentials.
     top_logs_fresh_enabled: bool = False
 
     # --- Initial admin ---

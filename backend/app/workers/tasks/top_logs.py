@@ -24,7 +24,7 @@ from app.config import settings
 from app.db import async_session_factory
 from app.models import GameSpec, TopLog, TopLogsSeedJob
 from app.services.top_logs_service import refresh_top_logs_for_spec_encounter
-from app.services.wcl.client import create_wcl_client, to_client_flavor
+from app.services.wcl.client import create_wcl_client, normalize_wcl_flavor, to_client_flavor
 from app.services.wcl_zones_service import fetch_current_raid_encounters
 
 logger = logging.getLogger(__name__)
@@ -40,10 +40,13 @@ async def _arq_pool() -> ArqRedis:
     )
 
 
-async def _seed_missing_current_tier_encounters() -> int:
+async def _seed_missing_current_tier_encounters(wcl_flavor: str = "retail") -> int:
     """Phase 1: queue a seed-job for each current-tier encounter we don't
-    already have any cached entries for. Returns the number queued."""
-    raid = await fetch_current_raid_encounters(force_refresh=True)
+    already have any cached entries for, for the given flavor. Returns the number queued."""
+    flavor = normalize_wcl_flavor(wcl_flavor)
+    client = create_wcl_client(flavor=to_client_flavor(flavor))
+    async with client:
+        raid = await fetch_current_raid_encounters(force_refresh=True, wcl_client=client)
     if not raid:
         return 0
     queued = 0
@@ -53,7 +56,7 @@ async def _seed_missing_current_tier_encounters() -> int:
                 (
                     await session.execute(
                         select(TopLog.encounter_id)
-                        .where(TopLog.wcl_flavor == "retail")
+                        .where(TopLog.wcl_flavor == flavor)
                         .distinct()
                     )
                 )
@@ -66,6 +69,7 @@ async def _seed_missing_current_tier_encounters() -> int:
                         select(TopLogsSeedJob.encounter_id).where(
                             TopLogsSeedJob.status.in_(("queued", "running")),
                             TopLogsSeedJob.metric_filter.is_(None),
+                            TopLogsSeedJob.wcl_flavor == flavor,
                         )
                     )
                 )
@@ -86,6 +90,7 @@ async def _seed_missing_current_tier_encounters() -> int:
                     metric_filter=None,
                     total_specs=0,
                     status="queued",
+                    wcl_flavor=flavor,
                 )
                 session.add(job)
                 new_jobs.append(job)
@@ -109,7 +114,12 @@ async def refresh_all_top_logs(_ctx: dict) -> int:
     (spec, encounter, metric) triples already in the cache so existing
     rankings stay current as players post fresh logs.
     """
-    seeded_new = await _seed_missing_current_tier_encounters()
+    active_flavors = ["retail"]
+    if settings.top_logs_fresh_enabled:
+        active_flavors.append("fresh")
+    seeded_new = 0
+    for flavor in active_flavors:
+        seeded_new += await _seed_missing_current_tier_encounters(wcl_flavor=flavor)
     logger.info("weekly top-logs: queued %d new current-tier seed jobs", seeded_new)
 
     refreshed = 0

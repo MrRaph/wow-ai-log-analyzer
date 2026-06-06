@@ -37,15 +37,46 @@ Both flows use the *same* WCL API client. You only register one.
 
 ## Classic Fresh (optional)
 
-Classic Fresh uses a separate Warcraft Logs host and OAuth client registry.
-If you want Fresh private-log access, create a second client at
-`https://fresh.warcraftlogs.com/api/clients/` and fill:
+Classic Fresh uses a separate Warcraft Logs host (`fresh.warcraftlogs.com`) and
+its own OAuth client registry. This is **separate** from retail and requires its
+own credentials.
+
+### 1. Register a Fresh OAuth client
+
+1. Go to https://fresh.warcraftlogs.com/ and sign in.
+2. Open https://fresh.warcraftlogs.com/api/clients/.
+3. Click **Create Client** and fill in the same way as the retail client, using
+   the Fresh redirect URLs:
+   ```
+   https://<your-domain>/api/v1/auth/wcl-fresh/callback, http://localhost:8000/api/v1/auth/wcl-fresh/callback
+   ```
+4. Copy the credentials to `.env`:
+   ```env
+   WCL_FRESH_CLIENT_ID=...
+   WCL_FRESH_CLIENT_SECRET=...
+   WCL_FRESH_REDIRECT_URI=https://<your-domain>/api/v1/auth/wcl-fresh/callback
+   ```
+
+### 2. Enable Fresh top-logs
+
+Fresh top-logs (public leaderboards, weekly cron, admin seeding) are gated by
+a separate feature flag. Once credentials are set, also add:
 
 ```env
-WCL_FRESH_CLIENT_ID=...
-WCL_FRESH_CLIENT_SECRET=...
-WCL_FRESH_REDIRECT_URI=https://<your-domain>/api/v1/auth/wcl-fresh/callback
+TOP_LOGS_FRESH_ENABLED=true
 ```
+
+When `false` (default), the API returns empty lists for Fresh top-log requests
+and the weekly cron only seeds retail encounters.
+
+### Classic Era vs Classic Fresh
+
+| Feature | Classic Era (`classic.warcraftlogs.com`) | Classic Fresh (`fresh.warcraftlogs.com`) |
+|---|---|---|
+| OAuth registry | Shares **retail** credentials | Requires **separate** Fresh credentials |
+| API host | `www.warcraftlogs.com` | `fresh.warcraftlogs.com` |
+| Top-logs flag | No separate flag (retail flag) | `TOP_LOGS_FRESH_ENABLED` |
+| URL import | Automatic — detected from URL subdomain | Automatic — detected from URL subdomain |
 
 ## Rate limiting
 
