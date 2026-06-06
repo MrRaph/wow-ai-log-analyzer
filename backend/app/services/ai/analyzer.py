@@ -743,8 +743,8 @@ async def request_analysis(
         logger.exception("Player enrichment failed; continuing with what we have")
 
     report_flavor = normalize_wcl_flavor(report.wcl_flavor)
-    logger.info(
-        "request_analysis: spec_slug=%r encounter_id=%r flavor=%s",
+    logger.warning(
+        "DEBUG request_analysis: spec_slug=%r encounter_id=%r flavor=%s",
         player.spec_slug,
         fight.encounter_id,
         report_flavor,
