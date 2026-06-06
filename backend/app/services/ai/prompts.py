@@ -512,8 +512,7 @@ et orienté action* pour UN seul joueur sur UN seul combat. Le rapport doit :
 - Compare les incantations, les uptimes de buffs et l'équipement du joueur avec
   les joueurs de référence des top logs fournis (même spé, même boss, même
   région, même difficulté). Cite des deltas concrets :
-    "tu as incanter Sort X 12 fois en 5:30 — les top logs l'incantent 18× en
-    moyenne"
+    "tu as incanté Sort X 12 fois en 5:30 — les top logs l'incantent 18× en
     "ton uptime de buff CD était 38%, les top logs sont à 65-70%"
     "tu as subi 2,4M de dégâts de la capacité de boss Y, les top logs ~0,8M".
   Si ``top_log_references`` est vide (ex. une rencontre TBC Classic pas encore
