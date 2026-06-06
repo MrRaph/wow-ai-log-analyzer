@@ -773,18 +773,16 @@ async def request_analysis(
                 wcl_flavor=report_flavor,
             )
 
-    if not references and fight.encounter_id is not None:
-        # Without references the AI's advice would be hand-waving rather
-        # than concrete deltas — refuse the request explicitly so the user
-        # knows to retry once WCL has data, instead of getting a generic
-        # critique that they might mistake for a real comparison.
-        # Exception: if encounter_id is None (e.g. TBC Classic Fresh fights
-        # that WCL doesn't assign a tracked encounter ID), we proceed without
-        # references rather than blocking the analysis entirely.
-        raise NoTopLogsError(
-            "No public Warcraft Logs entries are available for this spec on "
-            "this boss yet. Try again in a few days once more public logs "
-            "have been uploaded.",
+    if not references:
+        # No WCL reference data available (new boss, low log volume, or
+        # encounter not yet tracked). Proceed without deltas — same path
+        # as TBC Classic Fresh fights with no encounter_id — rather than
+        # blocking the analysis entirely.
+        logger.warning(
+            "No top-log references for spec=%s encounter_id=%s flavor=%s — proceeding without reference data",
+            player.spec_slug,
+            fight.encounter_id,
+            report_flavor,
         )
 
     fight_extras = fight.extras or {}
