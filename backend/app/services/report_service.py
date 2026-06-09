@@ -233,6 +233,7 @@ async def run_report_import(
                     "Could not resolve expansion for report %s zone_id=%s — keeping 'classic'",
                     code,
                     report.zone_id,
+                    exc_info=True,
                 )
 
         await session.flush()
