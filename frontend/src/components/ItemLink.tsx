@@ -10,12 +10,13 @@ interface Props {
   bonus?: number[];
   gem?: number[];
   ench?: number | null;
+  gameVersion?: string;
 }
 
-export function ItemLink({ itemId, locale, fallback, ilvl, bonus, gem, ench }: Props) {
+export function ItemLink({ itemId, locale, fallback, ilvl, bonus, gem, ench, gameVersion }: Props) {
   return (
     <a
-      href={itemUrl(itemId, locale, { ilvl, bonus, gem, ench })}
+      href={itemUrl(itemId, locale, { ilvl, bonus, gem, ench }, gameVersion)}
       target="_blank"
       rel="noopener noreferrer"
       data-wh-icon-size="small"

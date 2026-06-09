@@ -16,9 +16,10 @@ import type { Analysis, AnalysisStructured } from "@/types/api";
 interface Props {
   analysis: Analysis;
   locale: Locale;
+  gameVersion?: string;
 }
 
-export function AnalysisCard({ analysis, locale }: Props) {
+export function AnalysisCard({ analysis, locale, gameVersion }: Props) {
   const t = useTranslations();
 
   const structured = (analysis.structured ?? {}) as AnalysisStructured;
@@ -101,6 +102,7 @@ export function AnalysisCard({ analysis, locale }: Props) {
               locale={locale}
               nameMap={nameMap}
               talentSpellIds={talentSpellIds}
+              gameVersion={gameVersion}
               className=""
             />
           </h2>
@@ -154,6 +156,7 @@ export function AnalysisCard({ analysis, locale }: Props) {
                     locale={locale}
                     nameMap={nameMap}
                     talentSpellIds={talentSpellIds}
+                    gameVersion={gameVersion}
                     className=""
                   />
                 </li>
@@ -197,6 +200,7 @@ export function AnalysisCard({ analysis, locale }: Props) {
                   locale={locale}
                   nameMap={nameMap}
                   talentSpellIds={talentSpellIds}
+                  gameVersion={gameVersion}
                   className=""
                 />
               </h4>
@@ -205,6 +209,7 @@ export function AnalysisCard({ analysis, locale }: Props) {
                 locale={locale}
                 nameMap={nameMap}
                 talentSpellIds={talentSpellIds}
+                gameVersion={gameVersion}
                 className="mt-1 text-sm text-zinc-200"
               />
               {/* Chip list only as a fallback for legacy analyses without
@@ -220,6 +225,7 @@ export function AnalysisCard({ analysis, locale }: Props) {
                       spellId={id}
                       locale={locale}
                       fallback={nameMap[`spell:${id}`]}
+                      gameVersion={gameVersion}
                     />
                   ))}
                   {f.related_item_ids?.map((id) => (
@@ -228,6 +234,7 @@ export function AnalysisCard({ analysis, locale }: Props) {
                       itemId={id}
                       locale={locale}
                       fallback={nameMap[`item:${id}`]}
+                      gameVersion={gameVersion}
                     />
                   ))}
                 </div>
@@ -238,12 +245,12 @@ export function AnalysisCard({ analysis, locale }: Props) {
       </Card>
 
       <div className="grid gap-4 md:grid-cols-2">
-        {proseBlock(t("analyze.rotation"), s.rotation_summary, locale, nameMap, talentSpellIds)}
-        {proseBlock(t("analyze.cooldowns"), s.cooldown_usage_summary, locale, nameMap, talentSpellIds)}
-        {proseBlock(t("analyze.stats"), s.stat_recommendations, locale, nameMap, talentSpellIds)}
-        {proseBlock(t("analyze.talents"), s.talent_recommendations, locale, nameMap, talentSpellIds)}
-        {proseBlock(t("analyze.gearTrinkets"), s.gear_and_trinket_notes, locale, nameMap, talentSpellIds)}
-        {proseBlock(t("analyze.comparison"), s.comparison_to_top_logs, locale, nameMap, talentSpellIds)}
+        {proseBlock(t("analyze.rotation"), s.rotation_summary, locale, nameMap, talentSpellIds, gameVersion)}
+        {proseBlock(t("analyze.cooldowns"), s.cooldown_usage_summary, locale, nameMap, talentSpellIds, gameVersion)}
+        {proseBlock(t("analyze.stats"), s.stat_recommendations, locale, nameMap, talentSpellIds, gameVersion)}
+        {proseBlock(t("analyze.talents"), s.talent_recommendations, locale, nameMap, talentSpellIds, gameVersion)}
+        {proseBlock(t("analyze.gearTrinkets"), s.gear_and_trinket_notes, locale, nameMap, talentSpellIds, gameVersion)}
+        {proseBlock(t("analyze.comparison"), s.comparison_to_top_logs, locale, nameMap, talentSpellIds, gameVersion)}
       </div>
     </div>
   );
@@ -259,6 +266,7 @@ function proseBlock(
   locale: Locale,
   nameMap: Record<string, string>,
   talentSpellIds: Record<string, number>,
+  gameVersion?: string,
 ) {
   if (!body) return null;
   return (
@@ -269,6 +277,7 @@ function proseBlock(
         locale={locale}
         nameMap={nameMap}
         talentSpellIds={talentSpellIds}
+        gameVersion={gameVersion}
       />
     </Card>
   );

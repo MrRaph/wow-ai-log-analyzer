@@ -14,7 +14,7 @@ query ReportOverview($code: String!) {
       title
       startTime
       endTime
-      zone { id name }
+      zone { id name expansion { id name } }
       region { compactName }
       revision
       fights(killType: All) {

@@ -6,12 +6,13 @@ interface Props {
   spellId: number;
   locale: Locale;
   fallback?: string;
+  gameVersion?: string;
 }
 
-export function SpellLink({ spellId, locale, fallback }: Props) {
+export function SpellLink({ spellId, locale, fallback, gameVersion }: Props) {
   return (
     <a
-      href={spellUrl(spellId, locale)}
+      href={spellUrl(spellId, locale, gameVersion)}
       target="_blank"
       rel="noopener noreferrer"
       data-wh-icon-size="small"

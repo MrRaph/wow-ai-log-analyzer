@@ -25,6 +25,8 @@ interface Props {
    * /spell/<traitNodeEntryId> URL.
    */
   talentSpellIds?: Record<string, number>;
+  /** Game version slug (e.g. "tbc", "wotlk", "classic") for Wowhead URLs. */
+  gameVersion?: string;
   className?: string;
 }
 
@@ -50,10 +52,11 @@ export function ProseWithLinks({
   locale,
   nameMap = {},
   talentSpellIds = {},
+  gameVersion,
   className,
 }: Props) {
   if (!text) return null;
-  const segments = parseInlineRefs(text, locale, nameMap, talentSpellIds);
+  const segments = parseInlineRefs(text, locale, nameMap, talentSpellIds, gameVersion);
   // Render as ``<span>`` (not ``<p>``) so callers can drop it inside any
   // block element — including headings and table cells — without
   // producing invalid nested-paragraph HTML. The ``whitespace-pre-line``
@@ -93,6 +96,7 @@ function parseInlineRefs(
   locale: Locale,
   nameMap: Record<string, string>,
   talentSpellIds: Record<string, number>,
+  gameVersion?: string,
 ): ReactNode[] {
   const out: ReactNode[] = [];
   // Local copy of the regex so we don't fight other callers over lastIndex.
@@ -119,6 +123,7 @@ function parseInlineRefs(
           spellId={id}
           locale={locale}
           fallback={fallback}
+          gameVersion={gameVersion}
         />,
       );
     } else if (kind === "item") {
@@ -128,6 +133,7 @@ function parseInlineRefs(
           itemId={id}
           locale={locale}
           fallback={fallback}
+          gameVersion={gameVersion}
         />,
       );
     } else {
@@ -143,6 +149,7 @@ function parseInlineRefs(
             spellId={spellId}
             locale={locale}
             fallback={fallback}
+            gameVersion={gameVersion}
           />,
         );
       } else {

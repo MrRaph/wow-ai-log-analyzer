@@ -1052,6 +1052,7 @@ async def request_analysis(
         top_log_references=references,
         ilvl_context=_ilvl_context(player.item_level, references),
         localized_names=localized_names,
+        game_version=report.game_version or "retail",
     )
     sys_prompt = system_prompt_for(locale if locale in {"en", "de", "fr"} else "en")
 

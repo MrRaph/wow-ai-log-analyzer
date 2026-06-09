@@ -32,8 +32,34 @@ def _domain_to_flavor(host: str | None) -> WclFlavor:
     return "retail"
 
 
-def _flavor_to_game_version(wcl_flavor: WclFlavor) -> str:
-    return "classic" if wcl_flavor in {"fresh", "classic"} else "retail"
+# WCL expansion IDs → Wowhead URL prefix slug (used by the frontend and AI).
+# Expansion IDs 7+ (Legion and beyond) are retail-era content hosted on the
+# main wowhead.com site without a prefix.
+_EXPANSION_ID_TO_SLUG: dict[int, str] = {
+    1: "classic",    # Vanilla Classic / Classic Era / Season of Discovery
+    2: "tbc",        # The Burning Crusade Classic
+    3: "wotlk",      # Wrath of the Lich King Classic
+    4: "cata",       # Cataclysm Classic
+    5: "mop",        # Mists of Pandaria Classic
+    6: "wod",        # Warlords of Draenor
+}
+
+
+def _flavor_to_game_version(wcl_flavor: WclFlavor, expansion_id: int | None = None) -> str:
+    """Return a fine-grained game-version slug used across the app.
+
+    ``fresh`` is always Classic Era (expansion 1). For the ``classic``
+    subdomain we use the expansion_id from the zone metadata to tell TBC from
+    Wrath from Cata. Falls back to ``"classic"`` when the id is unknown.
+    Retail always returns ``"retail"``.
+    """
+    if wcl_flavor == "fresh":
+        return "classic"
+    if wcl_flavor == "classic":
+        if expansion_id is not None:
+            return _EXPANSION_ID_TO_SLUG.get(expansion_id, "classic")
+        return "classic"
+    return "retail"
 
 
 def parse_report_input_details(value: str) -> tuple[str, WclFlavor]:
@@ -66,6 +92,11 @@ def parse_report_overview(payload: dict[str, Any], *, wcl_flavor: WclFlavor = "r
     if not report:
         raise ValidationAppError("Report not found on Warcraft Logs (private or invalid code?).")
     zone = report.get("zone") or {}
+    zone_expansion_id: int | None = None
+    try:
+        zone_expansion_id = int((zone.get("expansion") or {}).get("id") or 0) or None
+    except (TypeError, ValueError):
+        pass
     region = report.get("region") or {}
     fights_in = report.get("fights") or []
 
@@ -156,11 +187,11 @@ def parse_report_overview(payload: dict[str, Any], *, wcl_flavor: WclFlavor = "r
         "zone_id": zone.get("id"),
         "zone_name": zone.get("name") or "",
         "region": region.get("compactName") or "",
-        # WCL no longer exposes gameVersion on Report. We keep ``wcl_flavor``
-        # separately on the Report row to distinguish retail/fresh/classic;
-        # ``game_version`` stays coarse ("retail" vs "classic") for existing
-        # downstream logic and UI labels.
-        "game_version": _flavor_to_game_version(wcl_flavor),
+        # Fine-grained slug derived from wcl_flavor + zone expansion id.
+        # Examples: "retail", "classic", "tbc", "wotlk", "cata", "mop".
+        # Used by the AI prompt for version-specific advice and by the
+        # frontend to build correct Wowhead URLs (e.g. /tbc/spell=X).
+        "game_version": _flavor_to_game_version(wcl_flavor, zone_expansion_id),
         "start_time": _ms_to_dt(report["startTime"]),
         "end_time": _ms_to_dt(report["endTime"]),
         "fights": fights,
