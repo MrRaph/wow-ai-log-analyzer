@@ -49,6 +49,7 @@ from app.services.wcl.queries import (
     REPORT_RANKINGS,
 )
 from app.services.wcl_oauth_service import build_user_wcl_client
+from app.services.wcl_zones_service import get_expansion_slug_for_zone
 from app.services.wow_data_service import (
     lookup_names,
     resolve_encounter_names_with_fallback,
@@ -1042,6 +1043,36 @@ async def request_analysis(
         )
         session.add(analysis)
     await session.flush()
+
+    # Resolve the effective game version for the AI prompt and Wowhead links.
+    # For reports imported before the fine-grained expansion slug was stored
+    # (or when zone.expansion was absent from the WCL response), game_version
+    # may still be the coarse "classic". Look it up from the WCL zones cache
+    # now and persist the refined slug so subsequent analyses are instant.
+    effective_game_version = report.game_version or "retail"
+    if effective_game_version == "classic" and report.zone_id:
+        try:
+            refined = await get_expansion_slug_for_zone(
+                report.zone_id, report_flavor
+            )
+            if refined:
+                effective_game_version = refined
+                report.game_version = refined
+                await session.flush()
+                logger.info(
+                    "Refined game_version for report %s zone_id=%s: classic → %s",
+                    report.id,
+                    report.zone_id,
+                    refined,
+                )
+        except Exception:  # noqa: BLE001
+            logger.warning(
+                "Could not resolve expansion for report %s zone_id=%s — using 'classic'",
+                report.id,
+                report.zone_id,
+                exc_info=True,
+            )
+
     user_prompt = build_user_prompt(
         locale=locale if locale in ("en", "de", "fr") else "en",  # type: ignore[arg-type]
         role_focus=role_focus,  # type: ignore[arg-type]
@@ -1052,7 +1083,7 @@ async def request_analysis(
         top_log_references=references,
         ilvl_context=_ilvl_context(player.item_level, references),
         localized_names=localized_names,
-        game_version=report.game_version or "retail",
+        game_version=effective_game_version,
     )
     sys_prompt = system_prompt_for(locale if locale in {"en", "de", "fr"} else "en")
 
