@@ -48,18 +48,23 @@ _EXPANSION_ID_TO_SLUG: dict[int, str] = {
 def _flavor_to_game_version(wcl_flavor: WclFlavor, expansion_id: int | None = None) -> str:
     """Return a fine-grained game-version slug used across the app.
 
-    ``fresh`` is always Classic Era (expansion 1). For the ``classic``
-    subdomain we use the expansion_id from the zone metadata to tell TBC from
-    Wrath from Cata. Falls back to ``"classic"`` when the id is unknown.
+    Both ``fresh`` and ``classic`` subdomains use the expansion_id from the
+    zone metadata to tell TBC from Wrath from Cata.  ``fresh`` defaults to
+    ``"classic"`` (Vanilla / Classic Era) when the expansion_id is absent or
+    unmapped — but Season of Discovery may progress to TBC content
+    (expansion 2) in which case the zone carries expansion_id=2 and we
+    correctly return ``"tbc"``.
     Retail always returns ``"retail"``.
     """
-    if wcl_flavor == "fresh":
-        return "classic"
-    if wcl_flavor == "classic":
-        if expansion_id is not None:
-            return _EXPANSION_ID_TO_SLUG.get(expansion_id, "classic")
-        return "classic"
-    return "retail"
+    if wcl_flavor == "retail":
+        return "retail"
+    # Both "fresh" and "classic": use expansion_id when available.
+    if expansion_id is not None:
+        slug = _EXPANSION_ID_TO_SLUG.get(expansion_id)
+        if slug:
+            return slug
+    # Fallback: "classic" (Vanilla) — correct default for Classic Era / SoD.
+    return "classic"
 
 
 def parse_report_input_details(value: str) -> tuple[str, WclFlavor]:

@@ -35,7 +35,7 @@ logger = logging.getLogger(__name__)
 
 UserTokenProvider = Callable[[], Awaitable[str]]
 WclFlavor = Literal["retail", "fresh", "classic"]
-WclClientFlavor = Literal["retail", "fresh", "classic"]
+WclClientFlavor = Literal["retail", "fresh"]
 
 
 class WclClient:
@@ -167,11 +167,29 @@ def _api_urls_for_flavor(flavor: WclFlavor) -> tuple[str, str, str]:
             settings.wcl_fresh_oauth_token_url,
         )
     if flavor == "classic":
-        # classic.warcraftlogs.com has its own GraphQL endpoint (so that
-        # worldData.zones returns Classic expansion zones, not retail zones).
-        # It shares OAuth credentials with the retail client.
-        return settings.wcl_classic_api_url, settings.wcl_user_api_url, settings.wcl_oauth_token_url
+        # Classic report data (fights, casts, rankings…) is accessible through
+        # the retail API host — the report namespace is global across all WCL
+        # game versions.  Only worldData.zones needs the classic-specific host
+        # (see wcl_zones_service.create_classic_zones_client).
+        return settings.wcl_api_url, settings.wcl_user_api_url, settings.wcl_oauth_token_url
     return settings.wcl_api_url, settings.wcl_user_api_url, settings.wcl_oauth_token_url
+
+
+def create_classic_zones_client() -> WclClient:
+    """Client pointing at classic.warcraftlogs.com solely for worldData.zones.
+
+    Classic report data (fights, casts, rankings) is served through the retail
+    host; only the zone-discovery query needs this endpoint so that it returns
+    TBC/WotLK/Cata zones instead of retail zones.  Shares OAuth credentials
+    with the retail client.
+    """
+    return WclClient(
+        client_id=settings.wcl_client_id,
+        client_secret=settings.wcl_client_secret,
+        api_url=settings.wcl_classic_api_url,
+        user_api_url=settings.wcl_user_api_url,
+        token_url=settings.wcl_oauth_token_url,
+    )
 
 
 def create_wcl_client(
@@ -199,7 +217,9 @@ def normalize_wcl_flavor(flavor: str | None) -> WclFlavor:
 def to_client_flavor(flavor: str | None) -> WclClientFlavor:
     """Map a flavor string to the WclClientFlavor used to create a WclClient.
 
-    Each flavor now has its own GraphQL endpoint so worldData.zones returns
-    the correct zones for that game version.
+    "classic" uses the retail API host for all report/ranking queries —
+    the global WCL report namespace is served through www.warcraftlogs.com.
+    Only worldData.zones needs a classic-specific host; that is handled in
+    wcl_zones_service via create_classic_zones_client().
     """
-    return normalize_wcl_flavor(flavor)  # "retail", "classic", or "fresh"
+    return "fresh" if normalize_wcl_flavor(flavor) == "fresh" else "retail"
