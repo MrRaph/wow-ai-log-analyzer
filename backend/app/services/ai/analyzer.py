@@ -1070,6 +1070,7 @@ async def request_analysis(
                 "Could not resolve expansion for report %s zone_id=%s — using 'classic'",
                 report.id,
                 report.zone_id,
+                exc_info=True,
             )
 
     user_prompt = build_user_prompt(
