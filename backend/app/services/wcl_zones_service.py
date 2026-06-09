@@ -20,7 +20,13 @@ from __future__ import annotations
 import logging
 from dataclasses import dataclass
 
-from app.services.wcl.client import WclClient, WclFlavor, create_classic_zones_client, create_wcl_client, to_client_flavor
+from app.services.wcl.client import (
+    WclClient,
+    WclFlavor,
+    create_classic_zones_client,
+    create_wcl_client,
+    to_client_flavor,
+)
 from app.services.wcl.parser import _EXPANSION_ID_TO_SLUG
 from app.services.wcl.queries import WORLD_ZONES
 
