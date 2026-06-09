@@ -55,6 +55,10 @@ class Settings(BaseSettings):
     # Local dev:  http://localhost:8000/api/v1/auth/wcl/callback
     wcl_redirect_uri: str = "http://localhost:8000/api/v1/auth/wcl/callback"
     wcl_oauth_scope: str = "view-user-profile"
+    # WCL Classic (TBC / WotLK / Cata — classic.warcraftlogs.com).
+    # Shares the same OAuth credentials as retail by default but queries a
+    # separate GraphQL endpoint so that worldData.zones returns Classic zones.
+    wcl_classic_api_url: str = "https://classic.warcraftlogs.com/api/v2/client"
     wcl_fresh_client_id: str = ""
     wcl_fresh_client_secret: str = ""
     wcl_fresh_api_url: str = "https://fresh.warcraftlogs.com/api/v2/client"

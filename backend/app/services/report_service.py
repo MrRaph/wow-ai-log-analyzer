@@ -16,6 +16,7 @@ from app.models import (
     ReportPlayerGear,
 )
 from app.services.wcl.client import WclClient, create_wcl_client, normalize_wcl_flavor, to_client_flavor
+from app.services.wcl_zones_service import get_expansion_slug_for_zone
 from app.services.wcl.parser import (
     aggregate_boss_casts,
     parse_damage_done_table,
@@ -216,6 +217,24 @@ async def run_report_import(
         report.game_version = overview["game_version"]
         report.start_time = overview["start_time"]
         report.end_time = overview["end_time"]
+
+        # If the zone expansion wasn't embedded in the REPORT_OVERVIEW
+        # response (can happen when the classic API returns a sparse zone
+        # object), refine the coarse "classic" slug via the zones-cache now.
+        if report.game_version == "classic" and report.zone_id:
+            try:
+                refined = await get_expansion_slug_for_zone(
+                    report.zone_id, flavor, wcl_client=client
+                )
+                if refined:
+                    report.game_version = refined
+            except Exception:  # noqa: BLE001
+                logger.warning(
+                    "Could not resolve expansion for report %s zone_id=%s — keeping 'classic'",
+                    code,
+                    report.zone_id,
+                )
+
         await session.flush()
 
         fights_by_id: dict[int, ReportFight] = {}

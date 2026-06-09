@@ -35,7 +35,7 @@ logger = logging.getLogger(__name__)
 
 UserTokenProvider = Callable[[], Awaitable[str]]
 WclFlavor = Literal["retail", "fresh", "classic"]
-WclClientFlavor = Literal["retail", "fresh"]
+WclClientFlavor = Literal["retail", "fresh", "classic"]
 
 
 class WclClient:
@@ -167,9 +167,10 @@ def _api_urls_for_flavor(flavor: WclFlavor) -> tuple[str, str, str]:
             settings.wcl_fresh_oauth_token_url,
         )
     if flavor == "classic":
-        # Classic-era logs on classic.warcraftlogs.com are routed through the
-        # retail API settings in this app unless fresh endpoints are selected.
-        return settings.wcl_api_url, settings.wcl_user_api_url, settings.wcl_oauth_token_url
+        # classic.warcraftlogs.com has its own GraphQL endpoint (so that
+        # worldData.zones returns Classic expansion zones, not retail zones).
+        # It shares OAuth credentials with the retail client.
+        return settings.wcl_classic_api_url, settings.wcl_user_api_url, settings.wcl_oauth_token_url
     return settings.wcl_api_url, settings.wcl_user_api_url, settings.wcl_oauth_token_url
 
 
@@ -196,4 +197,9 @@ def normalize_wcl_flavor(flavor: str | None) -> WclFlavor:
 
 
 def to_client_flavor(flavor: str | None) -> WclClientFlavor:
-    return "fresh" if normalize_wcl_flavor(flavor) == "fresh" else "retail"
+    """Map a flavor string to the WclClientFlavor used to create a WclClient.
+
+    Each flavor now has its own GraphQL endpoint so worldData.zones returns
+    the correct zones for that game version.
+    """
+    return normalize_wcl_flavor(flavor)  # "retail", "classic", or "fresh"
