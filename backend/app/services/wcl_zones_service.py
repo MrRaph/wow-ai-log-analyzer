@@ -39,8 +39,11 @@ class CurrentRaidEncounter:
 
 def _normalize_flavor_key(wcl_flavor: str) -> WclFlavor:
     """Normalise to one of the three valid flavor keys."""
-    if wcl_flavor in ("retail", "fresh", "classic"):
-        return wcl_flavor  # type: ignore[return-value]
+    from typing import cast
+
+    normalized = (wcl_flavor or "").strip().lower()
+    if normalized in ("retail", "fresh", "classic"):
+        return cast(WclFlavor, normalized)
     return "retail"
 
 
