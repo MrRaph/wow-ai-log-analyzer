@@ -1050,19 +1050,26 @@ async def request_analysis(
     # may still be the coarse "classic". Look it up from the WCL zones cache
     # now and persist the refined slug so subsequent analyses are instant.
     effective_game_version = report.game_version or "retail"
+    # ``"classic"`` is the coarse fallback stored for both fresh and classic
+    # flavor reports that were imported before fine-grained expansion slugs
+    # were introduced, OR when zone.expansion was absent from the WCL response.
+    # Look up the precise slug from the WCL zones cache and persist it so
+    # subsequent analyses are instant.  This also handles Season of Discovery
+    # (fresh.warcraftlogs.com) reports that carry TBC/WotLK/etc. content.
     if effective_game_version == "classic" and report.zone_id:
         try:
             refined = await get_expansion_slug_for_zone(
                 report.zone_id, report_flavor
             )
-            if refined:
+            if refined and refined != "classic":
                 effective_game_version = refined
                 report.game_version = refined
                 await session.flush()
                 logger.info(
-                    "Refined game_version for report %s zone_id=%s: classic → %s",
+                    "Refined game_version for report %s zone_id=%s (%s): classic → %s",
                     report.id,
                     report.zone_id,
+                    report_flavor,
                     refined,
                 )
         except Exception:  # noqa: BLE001

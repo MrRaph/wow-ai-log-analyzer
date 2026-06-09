@@ -5,6 +5,7 @@ import pytest
 
 from app.core.errors import ValidationAppError
 from app.services.wcl.parser import (
+    _flavor_to_game_version,
     class_slug_from_wcl,
     parse_report_input_details,
     parse_report_input,
@@ -62,3 +63,33 @@ def test_parse_report_input_details_flavor(value, flavor):
     code, parsed_flavor = parse_report_input_details(value)
     assert code == "AbCdEfGhIjKlMnOp"
     assert parsed_flavor == flavor
+
+
+# ---------------------------------------------------------------------------
+# _flavor_to_game_version — expansion_id routing
+# ---------------------------------------------------------------------------
+
+@pytest.mark.parametrize(
+    ("flavor", "expansion_id", "expected"),
+    [
+        # Retail ignores expansion_id entirely.
+        ("retail", None, "retail"),
+        ("retail", 2,    "retail"),
+        # Classic subdomain: expansion_id drives the slug.
+        ("classic", None, "classic"),   # no id → fall back to vanilla
+        ("classic", 1,    "classic"),   # Classic Era
+        ("classic", 2,    "tbc"),       # The Burning Crusade
+        ("classic", 3,    "wotlk"),     # Wrath of the Lich King
+        ("classic", 4,    "cata"),      # Cataclysm
+        ("classic", 5,    "mop"),       # Mists of Pandaria
+        ("classic", 99,   "classic"),   # Unknown id → fall back to vanilla
+        # Fresh subdomain: same expansion_id logic — SoD can host TBC content.
+        ("fresh",   None, "classic"),   # no id → Classic Era default
+        ("fresh",   1,    "classic"),   # Classic Era / SoD Season 1
+        ("fresh",   2,    "tbc"),       # SoD / Fresh server in TBC phase
+        ("fresh",   3,    "wotlk"),     # hypothetical WotLK Fresh
+        ("fresh",   99,   "classic"),   # Unknown id → fall back to vanilla
+    ],
+)
+def test_flavor_to_game_version(flavor, expansion_id, expected):
+    assert _flavor_to_game_version(flavor, expansion_id) == expected

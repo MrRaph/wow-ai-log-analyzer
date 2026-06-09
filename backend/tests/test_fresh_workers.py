@@ -402,9 +402,11 @@ async def test_clear_cache_removes_zone_expansion_map():
     clear_cache("classic")
 
     # After clearing, looking up the zone again must trigger a new fetch.
+    # For "classic", _fetch_all_zones uses create_classic_zones_client, not
+    # create_wcl_client, so we patch the correct factory.
     mock_client2 = AsyncMock()
     mock_client2.query = AsyncMock(return_value=FAKE_CLASSIC_ZONES_PAYLOAD)
-    with patch("app.services.wcl_zones_service.create_wcl_client", return_value=mock_client2):
+    with patch("app.services.wcl_zones_service.create_classic_zones_client", return_value=mock_client2):
         result = await get_expansion_slug_for_zone(1017, "classic")
 
     assert result == "tbc"

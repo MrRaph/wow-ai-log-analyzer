@@ -218,9 +218,11 @@ async def run_report_import(
         report.start_time = overview["start_time"]
         report.end_time = overview["end_time"]
 
-        # If the zone expansion wasn't embedded in the REPORT_OVERVIEW
-        # response (can happen when the classic API returns a sparse zone
-        # object), refine the coarse "classic" slug via the zones-cache now.
+        # If the zone expansion wasn't embedded in the REPORT_OVERVIEW response
+        # (can happen when the API returns a sparse zone object), refine the
+        # coarse "classic" slug via the zones-cache now.  This also handles
+        # Season of Discovery (fresh.warcraftlogs.com) reports that carry
+        # TBC or later content.
         if report.game_version == "classic" and report.zone_id:
             try:
                 refined = await get_expansion_slug_for_zone(

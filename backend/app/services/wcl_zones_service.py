@@ -20,7 +20,13 @@ from __future__ import annotations
 import logging
 from dataclasses import dataclass
 
-from app.services.wcl.client import WclClient, WclFlavor, create_wcl_client, to_client_flavor
+from app.services.wcl.client import (
+    WclClient,
+    WclFlavor,
+    create_classic_zones_client,
+    create_wcl_client,
+    to_client_flavor,
+)
 from app.services.wcl.parser import _EXPANSION_ID_TO_SLUG
 from app.services.wcl.queries import WORLD_ZONES
 
@@ -58,9 +64,22 @@ _zone_expansion_map: dict[str, dict[int, str]] = {}
 async def _fetch_all_zones(
     flavor_key: WclFlavor, wcl_client: WclClient | None = None
 ) -> list[dict]:
-    """Fetch the raw zone list from WCL for the given flavor."""
+    """Fetch the raw zone list from WCL for the given flavor.
+
+    For "classic" the query is routed through classic.warcraftlogs.com so that
+    worldData.zones returns Classic expansion zones (TBC, WotLK, Cata…) rather
+    than retail zones.  All other report/ranking queries still use the retail
+    host — only zone discovery needs the classic endpoint.
+    """
     own_client = wcl_client is None
-    client = wcl_client or create_wcl_client(flavor=to_client_flavor(flavor_key))
+    if own_client:
+        client = (
+            create_classic_zones_client()
+            if flavor_key == "classic"
+            else create_wcl_client(flavor=to_client_flavor(flavor_key))
+        )
+    else:
+        client = wcl_client
     try:
         payload = await client.query(WORLD_ZONES, {})
     finally:
@@ -185,14 +204,9 @@ async def get_expansion_slug_for_zone(
     """
     flavor_key = _normalize_flavor_key(wcl_flavor)
     if flavor_key not in _zone_expansion_map:
-        # Trigger a fetch that also populates _zone_expansion_map.
-        own_client = wcl_client is None
-        client = wcl_client or create_wcl_client(flavor=to_client_flavor(flavor_key))
-        try:
-            zones = await _fetch_all_zones(flavor_key, client)
-        finally:
-            if own_client:
-                await client.aclose()
+        # _fetch_all_zones handles client creation internally when wcl_client
+        # is None (including routing "classic" to classic.warcraftlogs.com).
+        zones = await _fetch_all_zones(flavor_key, wcl_client)
         _zone_expansion_map[flavor_key] = _build_zone_expansion_map(zones)
 
     return _zone_expansion_map[flavor_key].get(zone_id)
