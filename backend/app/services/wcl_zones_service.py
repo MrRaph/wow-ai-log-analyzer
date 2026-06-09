@@ -12,7 +12,7 @@ worker doesn't need to re-fetch.
 
 Flavor keys:
 - "retail" → queries www.warcraftlogs.com (retail zones)
-- "classic" → queries classic.warcraftlogs.com (TBC / WotLK / Cata zones)
+- "classic" → queries classic.warcraftlogs.com (TBC / WotLK / Cata / MoP zones)
 - "fresh"   → queries fresh.warcraftlogs.com  (Classic Era / SoD zones)
 """
 from __future__ import annotations
