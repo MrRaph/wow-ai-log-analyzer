@@ -436,6 +436,7 @@ async def fetch_shared_analysis(
         is_kill=bool(fight.is_kill) if fight else False,
         duration_ms=int(fight.duration_ms) if fight else 0,
         boss_percentage=fight.boss_percentage if fight else None,
+        game_version=report.game_version if report else "retail",
         player_name=player.name if player else "",
         player_server=player.server if player else "",
         player_class=player.class_slug if player else "",

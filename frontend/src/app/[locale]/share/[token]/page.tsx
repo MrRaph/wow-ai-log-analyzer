@@ -144,7 +144,7 @@ export default function PublicSharePage({
         </div>
       </Card>
 
-      <AnalysisCard analysis={cardAnalysis} locale={locale} />
+      <AnalysisCard analysis={cardAnalysis} locale={locale} gameVersion={data.game_version} />
     </div>
   );
 }

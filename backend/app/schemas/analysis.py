@@ -107,6 +107,9 @@ class AnalysisPublicOut(BaseModel):
     is_kill: bool
     duration_ms: int
     boss_percentage: float | None = None
+    # Fine-grained game version slug (e.g. "retail", "tbc", "wotlk", "cata").
+    # Used by the frontend to build correct Wowhead URLs.
+    game_version: str = "retail"
     # Public WoW character data — also already on warcraftlogs.com.
     player_name: str
     player_server: str

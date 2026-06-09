@@ -70,9 +70,15 @@ def stat_glossary_for(locale: Locale) -> dict[str, str]:
 
 
 SYSTEM_PROMPT_EN = """You are an elite World of Warcraft theorycrafter and coach
-analysing combat logs from warcraftlogs.com. You have deep, current knowledge
-of every class and specialisation in retail WoW: rotations, talent trees,
-stat priorities, trinkets, cooldown usage, raid mechanics, and Mythic+ play.
+analysing combat logs from warcraftlogs.com. You have deep knowledge of every
+class and specialisation across all WoW versions — retail, Classic Era,
+The Burning Crusade, Wrath of the Lich King, Cataclysm, and Mists of Pandaria
+Classic — covering rotations, talent trees, stat priorities, trinkets,
+cooldown usage, raid mechanics, and Mythic+ play.
+The user prompt includes a GAME VERSION line that tells you exactly which
+version of WoW this log is from. Calibrate all advice — available spells,
+enchants, gems, consumables, stat systems, and talent architecture — to that
+version. Never recommend content from a different era.
 
 Your job is to produce a *brutally honest, specific, action-oriented*
 improvement report for ONE player on ONE fight. The report must:
@@ -269,9 +275,14 @@ before or after the JSON object."""
 
 SYSTEM_PROMPT_DE = """Du bist ein professioneller World-of-Warcraft-Theorycrafter
 und Coach, der Combat Logs von warcraftlogs.com analysiert. Du hast tief
-gehendes, aktuelles Wissen über alle Klassen und Spezialisierungen in Retail
-WoW: Rotationen, Talentbäume, Attribut-Prioritäten, Trinkets, Cooldown-Einsatz,
-Raid-Mechaniken und Mythic+ Spiel.
+gehendes Wissen über alle Klassen und Spezialisierungen in allen WoW-Versionen —
+Retail, Classic Era, The Burning Crusade, Wrath of the Lich King, Cataclysm
+und Mists of Pandaria Classic — Rotationen, Talentbäume, Attribut-Prioritäten,
+Trinkets, Cooldown-Einsatz, Raid-Mechaniken und Mythic+ Spiel.
+Der User-Prompt enthält eine GAME VERSION-Zeile, die genau angibt, aus welcher
+WoW-Version dieser Log stammt. Richte alle Empfehlungen — verfügbare Zauber,
+Verzauberungen, Gems, Verbrauchsgüter, Attributsysteme und Talentarchitektur —
+nach dieser Version aus. Empfehle nie Inhalte aus einer anderen Spielera.
 
 Deine Aufgabe: Erstelle einen *schonungslos ehrlichen, spezifischen,
 handlungsorientierten* Verbesserungsbericht für GENAU einen Spieler auf GENAU
@@ -474,9 +485,15 @@ kein Fließtext vor oder nach dem JSON-Objekt."""
 
 SYSTEM_PROMPT_FR = """Tu es un theorycrafter et coach d'élite pour World of Warcraft,
 analysant des logs de combat provenant de warcraftlogs.com. Tu as une connaissance
-approfondie et à jour de toutes les classes et spécialisations en WoW retail :
-rotations, arbres de talents, priorités de statistiques, bibelots, utilisation des
-cooldowns, mécaniques de raid et Mythique+.
+approfondie de toutes les classes et spécialisations pour toutes les versions de
+WoW — Retail, Classic Era, The Burning Crusade, Wrath of the Lich King, Cataclysm
+et Mists of Pandaria Classic — : rotations, arbres de talents, priorités de
+statistiques, bibelots, utilisation des cooldowns, mécaniques de raid et Mythique+.
+Le prompt utilisateur contient une ligne GAME VERSION indiquant exactement la
+version de WoW dont provient ce log. Calibre tous tes conseils — sorts disponibles,
+enchantements, gemmes, consommables, systèmes de statistiques et architecture des
+talents — en fonction de cette version. Ne recommande jamais du contenu d'une
+autre ère de jeu.
 
 Ta mission : produire un rapport d'amélioration *brutalement honnête, spécifique
 et orienté action* pour UN seul joueur sur UN seul combat. Le rapport doit :
@@ -708,6 +725,198 @@ JSON_SCHEMA_HINT = """Output JSON shape:
 Sort findings so the most impactful ("critical") come first."""
 
 
+# Game-version context injected into the user prompt.  Tells the model which
+# era of WoW this log is from so it calibrates available spells, enchants,
+# gems, stat systems, and talent architecture accordingly.
+# Keys match the fine-grained slugs produced by parser._flavor_to_game_version.
+# Game-version context blocks per (version, locale).
+# Each entry tells the model which era of WoW this log is from so it
+# calibrates available spells, enchants, gems, stat systems, and talent
+# architecture accordingly.  Mirrors the structure of STAT_GLOSSARY.
+_GAME_VERSION_CONTEXT: dict[str, dict[Locale, str]] = {
+    "retail": {
+        "en": (
+            "GAME VERSION: Retail World of Warcraft (current expansion). "
+            "Modern talent trees (Dragon Riding, TWW, etc.), Embellishments, "
+            "Crafted gear. Wowhead base URL: https://www.wowhead.com/."
+        ),
+        "de": (
+            "SPIELVERSION: Retail World of Warcraft (aktuelle Erweiterung). "
+            "Moderne Talentbäume (Dragon Riding, TWW usw.), Einbettungen, "
+            "gecraftete Ausrüstung. Wowhead-Basis-URL: https://www.wowhead.com/."
+        ),
+        "fr": (
+            "VERSION DU JEU : World of Warcraft Retail (extension actuelle). "
+            "Arbres de talents modernes (Dragon Riding, TWW, etc.), Sertissages, "
+            "équipement artisanal. URL de base Wowhead : https://www.wowhead.com/."
+        ),
+    },
+    "classic": {
+        "en": (
+            "GAME VERSION: WoW Classic / Classic Era / Season of Discovery (Patch 1.x, "
+            "Vanilla). Old 3-tree talent system (up to 51 points). Stats available: "
+            "Strength, Agility, Intellect, Stamina, Spirit, Spell Power, Attack Power, "
+            "Hit Rating (9% spell-hit cap vs level 63 bosses, 8% melee), Critical Strike, "
+            "Defense, Dodge, Parry, Block. NO Haste rating, NO Mastery, NO Versatility, "
+            "NO item level scaling. Enchants and consumables are limited to vanilla content "
+            "(plus any Season of Discovery runes). Wowhead: https://www.wowhead.com/classic/. "
+            "Do NOT recommend enchants, gems, or abilities that did not exist in vanilla WoW."
+        ),
+        "de": (
+            "SPIELVERSION: WoW Classic / Classic Era / Season of Discovery (Patch 1.x, "
+            "Vanilla). Altes 3-Baum-Talentsystem (max. 51 Punkte). Verfügbare Attribute: "
+            "Stärke, Beweglichkeit, Intelligenz, Ausdauer, Willenskraft, Zaubermacht, "
+            "Angriffskraft, Trefferchance (9 % Zaubertreffer-Cap gegen Gegner Stufe 63, "
+            "8 % Nahkampf), Kritischer Trefferwert, Verteidigung, Ausweichen, Parieren, "
+            "Blocken. KEIN Tempowert, KEINE Meisterschaft, KEINE Vielseitigkeit, "
+            "KEIN Item-Level-Scaling. Verzauberungen und Verbrauchsgüter sind auf "
+            "Vanilla-Inhalte beschränkt (plus eventuelle Season-of-Discovery-Runen). "
+            "Wowhead: https://www.wowhead.com/classic/. "
+            "Empfehle KEINE Verzauberungen, Gems oder Fähigkeiten, die es in Vanilla nicht gab."
+        ),
+        "fr": (
+            "VERSION DU JEU : WoW Classic / Classic Era / Season of Discovery (Patch 1.x, "
+            "Vanilla). Ancien système de talents à 3 arbres (51 points max). Statistiques "
+            "disponibles : Force, Agilité, Intelligence, Endurance, Esprit, Puissance des "
+            "sorts, Puissance d'attaque, Score de toucher (cap 9 % sorts vs boss niveau 63, "
+            "8 % mêlée), Score de critique, Défense, Esquive, Parade, Blocage. "
+            "PAS de Célérité, PAS de Maîtrise, PAS de Polyvalence, "
+            "PAS de mise à l'échelle par niveau d'objet. Enchantements et consommables "
+            "limités au contenu Vanilla (plus les runes Season of Discovery éventuelles). "
+            "Wowhead : https://www.wowhead.com/classic/. "
+            "Ne recommande PAS d'enchantements, gemmes ou capacités inexistants en Vanilla."
+        ),
+    },
+    "tbc": {
+        "en": (
+            "GAME VERSION: WoW: The Burning Crusade Classic (Patch 2.x). "
+            "3-tree talent system (71 points). Stats: Hit Rating (spell cap 202 rating / "
+            "melee cap 142 rating vs level 73 bosses), Spell Hit, Haste Rating, Spell Haste "
+            "Rating, Armor Penetration, Resilience. Gems (socket bonuses), Enchants, "
+            "Meta gems exist. NO Mastery, NO Versatility, NO reforge. New races: Blood Elf, "
+            "Draenei. New class features: Paladin for Horde, Shaman for Alliance. "
+            "Wowhead: https://www.wowhead.com/tbc/. "
+            "Do NOT recommend Wrath/Cata/retail enchants, gems, or abilities."
+        ),
+        "de": (
+            "SPIELVERSION: WoW: The Burning Crusade Classic (Patch 2.x). "
+            "3-Baum-Talentsystem (71 Punkte). Attribute: Trefferchance (Zauber-Cap 202 / "
+            "Nahkampf-Cap 142 gegen Gegner Stufe 73), Zaubertreffer, Tempowert, "
+            "Zaubertempowert, Rüstungsdurchdringung, Belastbarkeit. Gems (Sockelboni), "
+            "Verzauberungen, Meta-Gems vorhanden. KEINE Meisterschaft, KEINE Vielseitigkeit, "
+            "KEIN Umschmieden. Neue Völker: Blutelf, Draenei. "
+            "Wowhead: https://www.wowhead.com/tbc/. "
+            "Empfehle KEINE Wrath/Cata/Retail-Verzauberungen, -Gems oder -Fähigkeiten."
+        ),
+        "fr": (
+            "VERSION DU JEU : WoW: The Burning Crusade Classic (Patch 2.x). "
+            "Système de talents à 3 arbres (71 points). Statistiques : Score de toucher "
+            "(cap sorts 202 / mêlée 142 vs boss niveau 73), Pénétration des sorts, "
+            "Score de célérité, Score de célérité des sorts, Pénétration de l'armure, "
+            "Résistance. Gemmes (bonus de sertissage), Enchantements, Méta-gemmes "
+            "disponibles. PAS de Maîtrise, PAS de Polyvalence, PAS de reforgerie. "
+            "Nouvelles races : Elfe de sang, Draeneï. "
+            "Wowhead : https://www.wowhead.com/tbc/. "
+            "Ne recommande PAS d'enchantements, gemmes ou capacités de Wrath/Cata/Retail."
+        ),
+    },
+    "wotlk": {
+        "en": (
+            "GAME VERSION: WoW: Wrath of the Lich King Classic (Patch 3.x). "
+            "Talent trees: 3-tree, 71 points. New class: Death Knight. Stats: "
+            "Armor Penetration (ArPen, key for physical DPS), Hit (8% melee, 17% spell "
+            "hit cap), Expertise, Haste, Crit, Spell Power, Attack Power. "
+            "Gems and enchants are WotLK-era. No Mastery, no Versatility. "
+            "Wowhead: https://www.wowhead.com/wotlk/. "
+            "Do NOT recommend Cata/retail enchants or abilities."
+        ),
+        "de": (
+            "SPIELVERSION: WoW: Wrath of the Lich King Classic (Patch 3.x). "
+            "Talentbäume: 3 Bäume, 71 Punkte. Neue Klasse: Todesritter. Attribute: "
+            "Rüstungsdurchdringung (ArPen, wichtig für physischen DPS), "
+            "Trefferchance (8 % Nahkampf, 17 % Zauber-Cap), Fachwissen, Tempo, Krit, "
+            "Zaubermacht, Angriffskraft. Gems und Verzauberungen im WotLK-Stil. "
+            "Keine Meisterschaft, keine Vielseitigkeit. "
+            "Wowhead: https://www.wowhead.com/wotlk/. "
+            "Empfehle KEINE Cata/Retail-Verzauberungen oder -Fähigkeiten."
+        ),
+        "fr": (
+            "VERSION DU JEU : WoW: Wrath of the Lich King Classic (Patch 3.x). "
+            "Arbres de talents : 3 arbres, 71 points. Nouvelle classe : Chevalier de la "
+            "mort. Statistiques : Pénétration de l'armure (ArPen, clé pour DPS physique), "
+            "Toucher (8 % mêlée, cap 17 % sorts), Expertise, Célérité, Critique, "
+            "Puissance des sorts, Puissance d'attaque. "
+            "Gemmes et enchantements d'époque WotLK. Pas de Maîtrise, pas de Polyvalence. "
+            "Wowhead : https://www.wowhead.com/wotlk/. "
+            "Ne recommande PAS d'enchantements ou capacités de Cata/Retail."
+        ),
+    },
+    "cata": {
+        "en": (
+            "GAME VERSION: WoW: Cataclysm Classic (Patch 4.x). "
+            "Talent trees: 31-point specialisation trees (choose a spec, spend 31 points "
+            "in it, then fill remaining points in any tree). New stat: Mastery (introduced "
+            "in Cata). Reforge mechanic available. Hit and Expertise caps apply. "
+            "Stats: Hit (7.5% melee, 17% spell), Expertise (26 rating), Mastery, "
+            "Haste, Crit — NO Versatility. Gems and enchants are Cataclysm-era. "
+            "Wowhead: https://www.wowhead.com/cata/. "
+            "Do NOT recommend MoP/retail enchants or abilities."
+        ),
+        "de": (
+            "SPIELVERSION: WoW: Cataclysm Classic (Patch 4.x). "
+            "Talentbäume: 31-Punkte-Spezialisierungsbäume (Spec wählen, 31 Punkte "
+            "hineinstecken, Rest frei verteilen). Neues Attribut: Meisterschaft "
+            "(eingeführt in Cata). Umschmieden möglich. Treffer- und Fachwissen-Caps aktiv. "
+            "Attribute: Trefferchance (7,5 % Nahkampf, 17 % Zauber), Fachwissen "
+            "(26 Rating), Meisterschaft, Tempo, Krit — KEINE Vielseitigkeit. "
+            "Gems und Verzauberungen im Cataclysm-Stil. "
+            "Wowhead: https://www.wowhead.com/cata/. "
+            "Empfehle KEINE MoP/Retail-Verzauberungen oder -Fähigkeiten."
+        ),
+        "fr": (
+            "VERSION DU JEU : WoW: Cataclysm Classic (Patch 4.x). "
+            "Arbres de talents : arbres de spécialisation à 31 points (choisir une spé, "
+            "y mettre 31 points, puis distribuer le reste librement). Nouvelle statistique : "
+            "Maîtrise (introduite dans Cata). Reforgerie disponible. Caps de toucher et "
+            "d'expertise s'appliquent. Statistiques : Toucher (7,5 % mêlée, 17 % sorts), "
+            "Expertise (26 rating), Maîtrise, Célérité, Critique — PAS de Polyvalence. "
+            "Gemmes et enchantements d'époque Cataclysme. "
+            "Wowhead : https://www.wowhead.com/cata/. "
+            "Ne recommande PAS d'enchantements ou capacités de MoP/Retail."
+        ),
+    },
+    "mop": {
+        "en": (
+            "GAME VERSION: WoW: Mists of Pandaria Classic (Patch 5.x). "
+            "Talent system overhauled: 6 tiers × 3 choices (18 total talent options), "
+            "fully flexible with Dual Spec. New class: Monk. Stats: Hit, Expertise, "
+            "Mastery, Haste, Crit — NO Versatility. Reforge available. "
+            "Wowhead: https://www.wowhead.com/mop/. "
+            "Do NOT recommend WoD/retail enchants or abilities."
+        ),
+        "de": (
+            "SPIELVERSION: WoW: Mists of Pandaria Classic (Patch 5.x). "
+            "Talentsystem überarbeitet: 6 Stufen × 3 Optionen (18 Talente insgesamt), "
+            "vollständig flexibel mit Doppel-Spezialisierung. Neue Klasse: Mönch. "
+            "Attribute: Trefferchance, Fachwissen, Meisterschaft, Tempo, Krit — "
+            "KEINE Vielseitigkeit. Umschmieden verfügbar. "
+            "Wowhead: https://www.wowhead.com/mop/. "
+            "Empfehle KEINE WoD/Retail-Verzauberungen oder -Fähigkeiten."
+        ),
+        "fr": (
+            "VERSION DU JEU : WoW: Mists of Pandaria Classic (Patch 5.x). "
+            "Système de talents remanié : 6 niveaux × 3 choix (18 talents au total), "
+            "entièrement flexible avec la Double Spécialisation. Nouvelle classe : Moine. "
+            "Statistiques : Toucher, Expertise, Maîtrise, Célérité, Critique — "
+            "PAS de Polyvalence. Reforgerie disponible. "
+            "Wowhead : https://www.wowhead.com/mop/. "
+            "Ne recommande PAS d'enchantements ou capacités de WoD/Retail."
+        ),
+    },
+}
+_GAME_VERSION_CONTEXT_DEFAULT: dict[Locale, str] = _GAME_VERSION_CONTEXT["retail"]
+
+
 def build_user_prompt(
     *,
     locale: Locale,
@@ -719,6 +928,7 @@ def build_user_prompt(
     top_log_references: list[dict[str, Any]],
     ilvl_context: dict[str, Any] | None = None,
     localized_names: dict[str, str] | None = None,
+    game_version: str = "retail",
 ) -> str:
     """Build the user-side prompt with all the structured data the model needs."""
     if locale == "de":
@@ -760,8 +970,10 @@ def build_user_prompt(
             "damage taken from boss mechanics."
         )
     )
+    version_block = _GAME_VERSION_CONTEXT.get(game_version, _GAME_VERSION_CONTEXT_DEFAULT)
+    game_ctx = version_block.get(locale, version_block["en"])
     return (
-        f"{lang}\n\n{focus}\n\n{JSON_SCHEMA_HINT}\n\n"
+        f"{lang}\n\n{game_ctx}\n\n{focus}\n\n{JSON_SCHEMA_HINT}\n\n"
         "Below is the structured data for ONE player on ONE fight, plus reference "
         "top-log entries (same spec, same encounter, region- and difficulty-"
         "filtered, with full detail data: casts, gear, buffs, debuffs, "

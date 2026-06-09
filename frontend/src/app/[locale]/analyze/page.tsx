@@ -474,7 +474,7 @@ function ReportView({
         </div>
       </Card>
 
-      {fight && <PlayersTable fight={fight} classes={classes} locale={locale} reportId={report.id} />}
+      {fight && <PlayersTable fight={fight} classes={classes} locale={locale} reportId={report.id} gameVersion={report.game_version} />}
     </div>
   );
 }
@@ -509,11 +509,13 @@ function PlayersTable({
   classes,
   locale,
   reportId,
+  gameVersion,
 }: {
   fight: ReportFight;
   classes: GameClass[];
   locale: Locale;
   reportId: string;
+  gameVersion?: string;
 }) {
   const t = useTranslations();
   const qc = useQueryClient();
@@ -798,7 +800,7 @@ function PlayersTable({
               locale={locale}
             />
           )}
-          <AnalysisCard analysis={analysisQ.data} locale={locale} />
+          <AnalysisCard analysis={analysisQ.data} locale={locale} gameVersion={gameVersion} />
         </>
       )}
     </div>

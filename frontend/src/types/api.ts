@@ -319,6 +319,7 @@ export interface AnalysisPublicOut {
   is_kill: boolean;
   duration_ms: number;
   boss_percentage: number | null;
+  game_version: string;
   player_name: string;
   player_server: string;
   player_class: string;
